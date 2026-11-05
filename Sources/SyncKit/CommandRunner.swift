@@ -1,7 +1,27 @@
-import Foundation
+import AppKit
 
 /// 在本机登录 shell 里跑补齐命令（brew / nvm / uv），边跑边把输出交给界面
 public enum CommandRunner {
+    /// 跑完再一次性拿结果（对面发来的卸载待办用，没人看着）
+    static func collect(_ command: String) async -> (status: Int32, output: String) {
+        var output = ""
+        var status: Int32 = -1
+        for await event in run(command) {
+            switch event {
+            case .output(let text): output += text
+            case .finished(let code): status = code
+            }
+        }
+        return (status, output)
+    }
+
+    /// 把 App 移到废纸篓；正在运行的不动
+    public static func trash(path: String, bundleID: String) async throws {
+        let running = await MainActor.run { !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty }
+        if running { throw SyncError("\(URL(filePath: path).deletingPathExtension().lastPathComponent) 正在运行，先退出再卸载") }
+        try await NSWorkspace.shared.recycle([URL(filePath: path)])
+    }
+
     public enum Event: Sendable {
         case output(String)
         case finished(Int32)

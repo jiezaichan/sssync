@@ -7,6 +7,7 @@ import Foundation
 ///     base/<sha256(条目)>.json      基线
 ///     decisions/<目标机器>/<id>.json 待办
 ///     receipts/<id>.json            回执
+///     notices/<机器>/<id>.json      对面执行卸载后留给发起那台的回执
 struct Relay: Sendable {
     let host: String
     let path: String
@@ -18,6 +19,8 @@ struct Relay: Sendable {
         var base: [String: String] = [:]
         var mine: [Decision] = []
         var theirs: [Decision] = []
+        /// 对面执行完本机发去的卸载后留给本机的回执，看过就删
+        var notices: [Receipt] = []
         /// 两台共用的同步清单；中转站上还没有时为 nil
         var shared: SharedConfig?
     }
@@ -36,7 +39,7 @@ struct Relay: Sendable {
 
     func setup(machines: [String]) throws {
         var dirs = ["blobs", "base", "receipts"]
-        for m in machines { dirs += ["machines/\(m)", "decisions/\(m)"] }
+        for m in machines { dirs += ["machines/\(m)", "decisions/\(m)", "notices/\(m)"] }
         try ssh("mkdir -p " + dirs.map { "\(path)/\($0)" }.joined(separator: " ") + " && chmod 700 \(path)")
     }
 
@@ -48,6 +51,7 @@ struct Relay: Sendable {
         echo '##BASE'; for f in base/*.json; do [ -f "$f" ] && cat "$f"; done
         echo '##MINE'; for f in decisions/\(me)/*.json; do [ -f "$f" ] && cat "$f"; done
         echo '##THEIRS'; for f in decisions/\(peer)/*.json; do [ -f "$f" ] && cat "$f"; done
+        echo '##NOTICES'; for f in notices/\(me)/*.json; do [ -f "$f" ] && cat "$f"; done
         echo '##SHARED'; cat shared.json 2>/dev/null; echo
         echo '##END'
         """
@@ -65,6 +69,7 @@ struct Relay: Sendable {
         }
         meta.mine = (sections["MINE"] ?? []).compactMap { try? JSON.decode(Decision.self, Data($0.utf8)) }
         meta.theirs = (sections["THEIRS"] ?? []).compactMap { try? JSON.decode(Decision.self, Data($0.utf8)) }
+        meta.notices = (sections["NOTICES"] ?? []).compactMap { try? JSON.decode(Receipt.self, Data($0.utf8)) }
         let sharedText = (sections["SHARED"] ?? []).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         if !sharedText.isEmpty { meta.shared = try? JSON.decode(SharedConfig.self, Data(sharedText.utf8)) }
         return meta

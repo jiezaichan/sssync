@@ -45,11 +45,24 @@ public actor Engine {
         var messages: [String] = []
         var meta = try relay.fetchMeta(me: me, peer: peer)
         try adoptShared(meta.shared)
+        // 对面让本机卸载的先做，下面采集的报告才是卸完的样子
+        let uninstalls = meta.mine.filter { $0.item.hasPrefix(Self.uninstallPrefix) }
+        if !uninstalls.isEmpty {
+            messages += await applyUninstalls(uninstalls, peerReport: meta.peer?.report)
+        }
         // 环境报告要跑登录 shell，几秒钟，和文件扫描并行
         let reportTask = Task.detached { [shared] in ReportCollector.collect(shared: shared) }
+        let syncDecisions = meta.mine.filter { !$0.item.hasPrefix(Self.uninstallPrefix) }
+        if !syncDecisions.isEmpty {
+            messages += await applyIncoming(syncDecisions)
+        }
         if !meta.mine.isEmpty {
-            messages += await applyIncoming(meta.mine)
             meta = try relay.fetchMeta(me: me, peer: peer)
+        }
+        if !meta.notices.isEmpty {
+            let from = config.label(peer)
+            messages += meta.notices.map { "\(from)：\($0.message)" }
+            try? relay.remove(meta.notices.map { "notices/\(me)/\($0.decision).json" })
         }
 
         var refs = Set<String>()
@@ -86,11 +99,88 @@ public actor Engine {
         publishedAt[peer] = meta.peer?.publishedAt
         var reports = [me: report]
         reports[peer] = meta.peer?.report
-        return Snapshot(me: me, peer: peer,
-                        machines: config.machines,
-                        rows: rows, publishedAt: publishedAt, messages: messages,
-                        peerMissing: meta.peer == nil,
-                        reports: reports, shared: shared, blockedApps: blockedApps)
+        var snapshot = Snapshot(me: me, peer: peer,
+                                machines: config.machines,
+                                rows: rows, publishedAt: publishedAt, messages: messages,
+                                peerMissing: meta.peer == nil,
+                                reports: reports, shared: shared, blockedApps: blockedApps)
+        snapshot.pendingRemovals = Set(meta.theirs.compactMap { d in
+            d.item.hasPrefix(Self.uninstallPrefix) ? String(d.item.dropFirst(Self.uninstallPrefix.count)) : nil
+        })
+        return snapshot
+    }
+
+    // MARK: 让对面卸载
+
+    static let uninstallPrefix = "uninstall:"
+
+    /// 对面多出来的东西，写成待办让对面自己卸；`seen` 是拍板时看到的对面的值
+    public func requestUninstall(rowID: String, name: String, seen: String) throws {
+        let decision = Decision(id: UUID().uuidString, item: Self.uninstallPrefix + rowID,
+                                expect: seen, value: name, mode: nil, decidedOn: me, decidedAt: Date())
+        try relay.put([("decisions/\(peer)/\(decision.id).json", try JSON.line(decision))])
+    }
+
+    /// 执行对面发来的卸载：按本机现在的报告重新算一遍，值和对面拍板时看到的一样、而且本机确实是多出来的那台才卸
+    private func applyUninstalls(_ decisions: [Decision], peerReport: MachineReport?) async -> [String] {
+        let report = await Task.detached { [shared] in ReportCollector.collect(shared: shared) }.value
+        var rows: [String: EnvRow] = [:]
+        if let peerReport {
+            let reports = [me: report, peer: peerReport]
+            let machines = [me, peer]
+            for row in (EnvCompare.environment(reports, machines: machines) + EnvCompare.apps(reports, machines: machines)).flatMap(\.rows) {
+                rows[row.id] = row
+            }
+        }
+        var messages: [String] = []
+        var receipts: [(String, Data)] = []
+        var done: [String] = []
+        for decision in decisions.sorted(by: { $0.decidedAt < $1.decidedAt }) {
+            let rowID = String(decision.item.dropFirst(Self.uninstallPrefix.count))
+            let name = decision.value
+            let from = config.label(decision.decidedOn)
+            var result = "applied"
+            var message: String
+            if let row = rows[rowID], row.values[me] == decision.expect, let removal = row.removals[me] {
+                do {
+                    switch removal {
+                    case .run(let command):
+                        let (status, output) = await CommandRunner.collect(command)
+                        if status != 0 {
+                            let tail = output.split(separator: "\n").suffix(3).joined(separator: " ")
+                            throw SyncError("退出码 \(status)：\(tail)")
+                        }
+                    case .trash(let path, let bundleID):
+                        try await CommandRunner.trash(path: path, bundleID: bundleID)
+                    case .open:
+                        throw SyncError("这一项不能自动卸载")
+                    }
+                    message = "已按\(from)的决定卸载 \(name)"
+                } catch {
+                    result = "failed"
+                    message = "\(name) 没能卸载（\(from)让卸的）：\(error.localizedDescription)。到这台上点「在本机卸载」试试"
+                }
+            } else {
+                result = "stale"
+                message = "\(name)：\(from)让卸载，但这台现在的情况和当时不一样了，没有动"
+            }
+            messages.append(message)
+            let receipt = Receipt(decision: decision.id, item: decision.item, result: result,
+                                  message: message, machine: me, at: Date())
+            if let data = try? JSON.line(receipt) {
+                receipts.append(("receipts/\(decision.id).json", data))
+                // 发起那台下次刷新时看到结果
+                receipts.append(("notices/\(decision.decidedOn)/\(decision.id).json", data))
+            }
+            done.append("decisions/\(me)/\(decision.id).json")
+        }
+        do {
+            try relay.put(receipts)
+            try relay.remove(done)
+        } catch {
+            messages.append("回执没写到中转站：\(error.localizedDescription)")
+        }
+        return messages
     }
 
     /// 偏好条目所在的域有一台读不到时不显示

@@ -200,15 +200,20 @@ final class AppModel {
         }
     }
 
+    /// 对面多出来的，写成待办让对面自己卸
+    func requestUninstall(_ row: EnvRow, on machine: String) async {
+        guard let seen = row.values[machine] else { return }
+        await perform { try await $0.requestUninstall(rowID: row.id, name: row.name, seen: seen) }
+    }
+
     /// 卸载不是 brew 装的 App：移到废纸篓，能找回。App Store 装的归 root，系统挡住就交给访达（会要密码）
     private func trash(_ path: String, bundleID: String) async {
         let name = URL(filePath: path).deletingPathExtension().lastPathComponent
-        if !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty {
-            errorText = "\(name) 正在运行，先退出再卸载"
-            return
-        }
         do {
-            try await NSWorkspace.shared.recycle([URL(filePath: path)])
+            try await CommandRunner.trash(path: path, bundleID: bundleID)
+        } catch let error as SyncError {
+            errorText = error.localizedDescription
+            return
         } catch {
             let escaped = path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             var failure: NSDictionary?
@@ -283,7 +288,7 @@ final class AppModel {
             post("\(snapshot.badge(snapshot.peer))改了 \(fresh.count) 项", fresh.count > 4 ? names + " 等" : names)
         }
         if !snapshot.messages.isEmpty {
-            post("sssync 执行了对面的决定", snapshot.messages.joined(separator: "\n"))
+            post("sssync 执行结果", snapshot.messages.joined(separator: "\n"))
         }
     }
 

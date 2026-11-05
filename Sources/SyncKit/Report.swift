@@ -267,10 +267,12 @@ enum ReportCollector {
         var seen = Set<String>()
         var out: [AppInfo] = []
         for url in bundles {
-            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !id.hasPrefix("com.apple.") else { continue }
+            // 直接读 Info.plist：Bundle(url:) 在进程里按路径缓存，App 升级后还是旧版本号，常驻时就一直报旧的
+            guard let data = try? Data(contentsOf: url.appending(path: "Contents/Info.plist")),
+                  let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let id = info["CFBundleIdentifier"] as? String, !id.hasPrefix("com.apple.") else { continue }
             let canonical = shared.canonicalApp(id)
             guard seen.insert(canonical).inserted else { continue }
-            let info = bundle.infoDictionary ?? [:]
             let fileName = url.lastPathComponent
             let name = (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? url.deletingPathExtension().lastPathComponent
             let version = (info["CFBundleShortVersionString"] as? String) ?? (info["CFBundleVersion"] as? String) ?? ""

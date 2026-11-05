@@ -27,7 +27,8 @@ struct EnvList: View {
         let shown = filtered
         return VStack(spacing: 0) {
             HStack {
-                Text("「确认差异」= 两边就这样，不再提醒；「在本机安装 / 升级」= 补成跟对面一样；「在本机卸载」= 删掉对面没有的")
+                Text("「确认差异」= 两边就这样，不再提醒；「安装 / 升级」= 补成跟对面一样；「卸载」= 删掉只有一边有的")
+                    .lineLimit(2)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -37,9 +38,9 @@ struct EnvList: View {
             .padding(.horizontal, 18)
             .padding(.top, 10)
             HStack(spacing: 14) {
-                Text("项目").frame(maxWidth: .infinity, alignment: .leading)
+                Text("项目").envNameColumn()
                 ForEach(snapshot.machineOrder, id: \.self) { m in
-                    Text(snapshot.badge(m)).frame(width: EnvLayout.value, alignment: .leading)
+                    Text(snapshot.badge(m)).envValueColumn()
                 }
                 Text("操作").frame(width: EnvLayout.action, alignment: .leading)
             }
@@ -118,9 +119,23 @@ struct AcknowledgedList: View {
     }
 }
 
+/// 两边的值先拿到宽度，名字拿剩下的，但至少留 `name` 宽
 enum EnvLayout {
+    static let name: CGFloat = 170
+    static let valueMin: CGFloat = 80
     static let value: CGFloat = 180
-    static let action: CGFloat = 360
+    static let action: CGFloat = 330
+}
+
+extension View {
+    func envNameColumn() -> some View {
+        frame(minWidth: EnvLayout.name, maxWidth: .infinity, alignment: .leading)
+    }
+
+    func envValueColumn() -> some View {
+        frame(minWidth: EnvLayout.valueMin, idealWidth: EnvLayout.value, maxWidth: EnvLayout.value, alignment: .leading)
+            .layoutPriority(1)
+    }
 }
 
 struct EnvRowView: View {
@@ -128,6 +143,7 @@ struct EnvRowView: View {
     let row: EnvRow
     let snapshot: Snapshot
     @State private var confirmRemove = false
+    @State private var confirmPeerRemove = false
 
     var body: some View {
         let acked = !row.same && model.isAcked(row)
@@ -143,7 +159,7 @@ struct EnvRowView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .envNameColumn()
 
             ForEach(snapshot.machineOrder, id: \.self) { m in
                 Group {
@@ -154,7 +170,7 @@ struct EnvRowView: View {
                     }
                 }
                 .font(.callout)
-                .frame(width: EnvLayout.value, alignment: .leading)
+                .envValueColumn()
             }
 
             actions.frame(width: EnvLayout.action, alignment: .leading)
@@ -196,12 +212,29 @@ struct EnvRowView: View {
                         Text(removal.text)
                     }
             }
+            if row.removals[snapshot.peer] != nil {
+                let peer = snapshot.label(snapshot.peer)
+                if snapshot.pendingRemovals.contains(row.id) {
+                    Text("等\(peer)卸载").font(.caption).foregroundStyle(.secondary)
+                        .help("\(peer)的 sssync 下次刷新时会自己卸载，结果会通知到这台")
+                } else {
+                    Button("让\(peer)卸载", role: .destructive) { confirmPeerRemove = true }
+                        .help("\(snapshot.label(snapshot.me))没有这一项。写成待办，\(peer)的 sssync 下次刷新时自己卸掉（那台情况变了就不动）")
+                        .confirmationDialog("让\(peer)卸载「\(row.name)」？", isPresented: $confirmPeerRemove) {
+                            Button("让\(peer)卸载", role: .destructive) {
+                                Task { await model.requestUninstall(row, on: snapshot.peer) }
+                            }
+                        } message: {
+                            Text("\(peer)的 sssync 下次刷新时执行：\n\(row.removals[snapshot.peer]!.text)")
+                        }
+                }
+            }
             if let fix = row.fixes[snapshot.peer] {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(fix.text, forType: .string)
                 } label: {
-                    Label("复制命令", systemImage: "doc.on.doc")
+                    Label("复制安装命令", systemImage: "doc.on.doc")
                 }
                 .help("\(snapshot.label(snapshot.peer))缺这一项。复制后到\(snapshot.label(snapshot.peer))上执行，或在那台的 sssync 里点「在本机安装」：\n\(fix.text)")
             }

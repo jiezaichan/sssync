@@ -46,7 +46,8 @@ struct StateDoc: Codable, Sendable {
     var unreadable: [String]?
 }
 
-/// 发给某台的待办：目标机器上当前值等于 expect 时，才把它写成 value
+/// 发给某台的待办：目标机器上当前值等于 expect 时，才把它写成 value。
+/// `item` 以 `uninstall:` 开头的是「让那台卸载」：后面是 `EnvRow.id`，expect 是拍板时看到的那台的值，value 是显示名
 struct Decision: Codable, Sendable {
     var id: String
     var item: String
@@ -132,6 +133,8 @@ public struct Snapshot: Sendable {
     public let shared: SharedConfig
     /// 机器 → 读不到的沙盒 App 名（需要在那台上给 sssync 开完全磁盘访问）
     public let blockedApps: [String: [String]]
+    /// 已经让对面卸载、对面还没执行的环境 / 应用行（`EnvRow.id`）
+    public var pendingRemovals: Set<String> = []
 
     public func label(_ machine: String) -> String { machines[machine]?.label ?? machine }
     public func emoji(_ machine: String) -> String { machines[machine]?.emoji ?? "" }

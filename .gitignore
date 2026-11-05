@@ -1,0 +1,7 @@
+build/
+# 由 XcodeGen 从 project.yml 生成
+sssync.xcodeproj/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+.DS_Store

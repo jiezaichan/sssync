@@ -1,0 +1,60 @@
+name: sssync
+options:
+  bundleIdPrefix: com.jiezaichan
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  # 系统菜单、设置窗口标题等跟着显示中文
+  developmentLanguage: zh-Hans
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # 固定用开发者证书签名：签名身份不随重新编译变化，完全磁盘访问等系统授权只需给一次
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: 96BTTXKZ9W
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+targets:
+  SyncKit:
+    type: framework
+    platform: macOS
+    sources: [Sources/SyncKit]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezaichan.sssync.SyncKit
+  sssync:
+    type: application
+    platform: macOS
+    sources: [Sources/App, Resources/Assets.xcassets]
+    dependencies:
+      - target: SyncKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezaichan.sssync
+        INFOPLIST_KEY_CFBundleDisplayName: sssync
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: 卸载 App Store 装的 App 时，请访达把它移到废纸篓
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APP_SANDBOX: NO
+  SyncKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests/SyncKitTests]
+    dependencies:
+      - target: SyncKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jiezaichan.sssync.tests
+schemes:
+  sssync:
+    build:
+      targets:
+        sssync: all
+    test:
+      targets: [SyncKitTests]

@@ -12,7 +12,6 @@
 - **对比（diff）自己写**：`Sources/SyncKit/TextDiff.swift`，不引入第三方 diff 库，也不调用外部编辑器做对比。
 - **读不到 ≠ 不存在**：某台读不到的东西（沙盒被挡等）整个不参与对比，绝不当成「没有」发待办。
 - **环境与应用只改本机**：本机缺的可以补齐 / 升级，本机多出来（对面没有）的可以卸载；卸载要先弹确认，App 不是 brew 装的就移到废纸篓。对面多出来的可以「让对面卸载」：写成 `uninstall:<EnvRow.id>` 待办，对面刷新时按自己当时的报告重算，值和拍板时看到的一样才卸，结果经 `notices/<发起机器>/` 回传。对面缺的只给复制安装命令。
-- **噪音规则内置在代码里**（`SharedConfig.builtinNoiseKeys`、`Recorder.noisePaths`），`shared.json` 只放用户自己加的，这样改规则不用迁移中转站上的清单。
 - 同步清单（`SharedConfig`）两台共用，以中转站 `shared.json` 为准；本机配置（`Config`）只有机器、中转站、常驻选项。新增字段一律 `decodeIfPresent` 给默认值。
 - 界面文字全部中文；机器在界面上一律用 `badge`（emoji + 名字），左右列固定家里在左、公司在右（`Snapshot.machineOrder`）。
 
@@ -38,6 +37,6 @@
 
 ## 目录
 
-- `Sources/SyncKit/`：`Engine`（编排）、`Reconciler`（三方对账）、`FileProvider` / `HandlerProvider` / `PrefProvider` / `AgentProvider`（扫描与应用）、`Relay`（中转站）、`TextDiff`（Myers diff）、`Merge`（diff3）、`Report` + `EnvCompare`（环境与应用报告）、`Recorder`（录制）、`Secrets`（打码）、`CommandRunner`（本机补齐命令）
-- `Sources/App/`：`AppModel`、`ContentView`（列表）、`EnvView`（环境 / 应用 / 命令面板）、`DiffView`（对比窗口）、`Sheets`（合并、模板、录制）、`SettingsView`（通用 + 同步清单）、`SssyncApp`（窗口 + 菜单栏）
+- `Sources/SyncKit/`：`Engine`（编排）、`Reconciler`（三方对账）、`FileProvider` / `HandlerProvider` / `AgentProvider`（扫描与应用）、`Relay`（中转站）、`TextDiff`（Myers diff）、`Merge`（diff3）、`Report` + `EnvCompare`（环境与应用报告）、`Secrets`（打码）、`CommandRunner`（本机补齐命令）
+- `Sources/App/`：`AppModel`、`ContentView`（列表）、`EnvView`（环境 / 应用 / 命令面板）、`DiffView`（对比窗口）、`Sheets`（合并、模板）、`SettingsView`（通用 + 同步清单）、`SssyncApp`（窗口 + 菜单栏）
 - `scripts/`：`install.sh`、`make-icon.swift`

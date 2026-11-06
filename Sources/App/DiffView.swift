@@ -40,16 +40,18 @@ struct DiffSheet: View {
             if row.secret {
                 Label("密钥已打码", systemImage: "lock.fill").font(.callout).foregroundStyle(.secondary)
             }
-            if row.mergeable && !row.status.isWaiting {
-                Button("合并两边…") { model.sheet = .merge(row) }
-            }
-            if !row.status.isWaiting {
-                ForEach(snapshot.machineOrder, id: \.self) { machine in
-                    let title = snapshot.arrow(machine, text: "以\(snapshot.label(machine))为准")
-                    if row.suggested == machine {
-                        Button(title) { choose(machine) }.buttonStyle(.borderedProminent)
-                    } else {
-                        Button(title) { choose(machine) }.buttonStyle(.bordered)
+            if row.status != .same {
+                if row.mergeable && !row.status.isWaiting {
+                    Button("合并两边…") { model.sheet = .merge(row) }
+                }
+                if !row.status.isWaiting {
+                    ForEach(snapshot.machineOrder, id: \.self) { machine in
+                        let title = snapshot.arrow(machine, text: "以\(snapshot.label(machine))为准")
+                        if row.suggested == machine {
+                            Button(title) { choose(machine) }.buttonStyle(.borderedProminent)
+                        } else {
+                            Button(title) { choose(machine) }.buttonStyle(.bordered)
+                        }
                     }
                 }
             }
@@ -93,14 +95,10 @@ struct TextDiffView: View {
             columnHeader
             Divider()
             if let result {
-                if result.added == 0 && result.removed == 0 && left != nil && right != nil {
-                    ContentUnavailableView("内容相同", systemImage: "equal.circle")
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(result.rows) { row in
-                                line(row)
-                            }
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(result.rows) { row in
+                            line(row)
                         }
                     }
                 }
@@ -109,7 +107,9 @@ struct TextDiffView: View {
             }
         }
         .task(id: showAll) {
-            let l = left ?? "", r = right ?? "", context = showAll ? nil : 3
+            let l = left ?? "", r = right ?? ""
+            // 内容相同也显示全文，方便核对
+            let context = (showAll || l == r) ? nil : 3
             result = await Task.detached { TextDiff.sideBySide(l, r, context: context) }.value
         }
     }
@@ -277,8 +277,9 @@ struct DirectoryDiffView: View {
     private var entries: [Entry] {
         let order = snapshot.machineOrder
         let l = members[order[0]] ?? [:], r = members[order[1]] ?? [:]
-        return Set(l.keys).union(r.keys).sorted().compactMap { path in
-            l[path] == r[path] ? nil : Entry(path: path, left: l[path], right: r[path])
+        // 全部列出来：一致的文件也要能查看
+        return Set(l.keys).union(r.keys).sorted().map { path in
+            Entry(path: path, left: l[path], right: r[path])
         }
     }
 
@@ -311,11 +312,13 @@ struct DirectoryDiffView: View {
                         EmptyView()
                     }
                 } else if entries.isEmpty {
-                    ContentUnavailableView("文件内容相同", systemImage: "equal.circle",
-                                           description: Text("只有文件权限之类的属性不同"))
+                    ContentUnavailableView("目录是空的", systemImage: "folder")
                 } else {
+                    let different = entries.filter { $0.left != $0.right }.count
                     ContentUnavailableView("选一个文件看对比", systemImage: "sidebar.left",
-                                           description: Text("共 \(entries.count) 个文件不一样"))
+                                           description: Text(different == 0
+                                               ? "共 \(entries.count) 个文件，全部一致"
+                                               : "共 \(entries.count) 个文件，\(different) 个不一样"))
                 }
             }
             .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
@@ -338,7 +341,9 @@ struct DirectoryDiffView: View {
     @ViewBuilder
     private func badge(_ entry: Entry) -> some View {
         let order = snapshot.machineOrder
-        if entry.left == nil {
+        if entry.left == entry.right {
+            tag("一致", .green)
+        } else if entry.left == nil {
             tag("只\(snapshot.label(order[1]))有", .green)
         } else if entry.right == nil {
             tag("只\(snapshot.label(order[0]))有", .green)

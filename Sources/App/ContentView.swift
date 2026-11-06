@@ -32,9 +32,6 @@ struct ContentView: View {
                     Label("文件", systemImage: "doc.on.doc")
                         .badge(model.count(.files))
                         .tag(SidebarItem.files)
-                    Label("App 设置", systemImage: "slider.horizontal.3")
-                        .badge(model.count(.prefs))
-                        .tag(SidebarItem.prefs)
                     Label("启动项", systemImage: "bolt.horizontal")
                         .badge(model.count(.agents))
                         .tag(SidebarItem.agents)
@@ -62,17 +59,6 @@ struct ContentView: View {
             }
         }
         .navigationTitle(model.title)
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    model.sheet = .record
-                } label: {
-                    Label("录制 App 配置", systemImage: "record.circle")
-                }
-                .help("录制：找出一个 App 的设置存在哪里，加进同步")
-                .disabled(model.snapshot == nil)
-            }
-        }
         .sheet(item: $model.sheet) { sheet in
             if let snapshot = model.snapshot {
                 switch sheet {
@@ -80,7 +66,6 @@ struct ContentView: View {
                 case .merge(let row): MergeSheet(row: row, snapshot: snapshot).environment(model)
                 case .template(let row): TemplateSheet(row: row, snapshot: snapshot).environment(model)
                 case .command(let job): CommandSheet(job: job).environment(model)
-                case .record: RecordSheet(snapshot: snapshot).environment(model)
                 }
             }
         }
@@ -195,21 +180,6 @@ struct Banners: View {
                     banner("\(s.badge(s.peer)) 还没发布过状态：在那台电脑上打开一次 sssync 就有了",
                            systemImage: "info.circle.fill", tint: .orange)
                 }
-                ForEach(s.machineOrder.filter { s.blockedApps[$0] != nil }, id: \.self) { machine in
-                    HStack {
-                        Image(systemName: "lock.shield.fill").foregroundStyle(.orange)
-                        Text("\(s.badge(machine))读不到 \(s.blockedApps[machine]!.joined(separator: "、")) 的设置，这些 App 先不对比。macOS 不让读别的 App 的沙盒数据：在\(s.label(machine))上给 sssync 开「完全磁盘访问」，再刷新（只需一次）。")
-                        Spacer()
-                        if machine == s.me {
-                            Button("打开系统设置") {
-                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Color.orange.opacity(0.08))
-                }
                 ForEach(s.messages, id: \.self) { message in
                     banner(message, systemImage: "checkmark.circle.fill", tint: .blue)
                 }
@@ -233,7 +203,9 @@ struct Banners: View {
 
 enum Layout {
     static let value: CGFloat = 140
-    static let actions: CGFloat = 320
+    /// 操作区要塞下「以家里为准」「以公司为准」「确认差异」「查看」「更多」，
+    /// 太窄会把文字挤成省略号
+    static let actions: CGFloat = 400
 }
 
 struct RowList: View {
@@ -324,6 +296,21 @@ struct RowView: View {
         }
     }
 
+    /// 对比入口：文件看内容差异，目录列出目录里每个文件（相同的也列出）
+    @ViewBuilder
+    private var diffButton: some View {
+        if row.kind != .handler {
+            Button {
+                model.sheet = .diff(row)
+            } label: {
+                Label("查看", systemImage: "rectangle.split.2x1")
+            }
+            .fixedSize()
+            .help(row.kind == .dir ? "列出目录里的每一个文件（相同的也列出），选一个看内容" : "左右对比")
+            .accessibilityLabel("对比 \(row.name)")
+        }
+    }
+
     @ViewBuilder
     private var actions: some View {
         if row.status == .same {
@@ -333,6 +320,7 @@ struct RowView: View {
                 if row.kind == .handler {
                     handlerMenu
                 }
+                diffButton
             }
         } else if row.status == .waiting {
             Label("已拍板，等\(snapshot.label(snapshot.peer))应用", systemImage: "clock")
@@ -341,6 +329,26 @@ struct RowView: View {
             Label("清单改过，等\(snapshot.label(snapshot.peer))按新清单刷新", systemImage: "arrow.clockwise")
                 .foregroundStyle(.secondary)
                 .help("\(snapshot.label(snapshot.peer))上次是按旧清单扫描的，它那边的值还不知道")
+        } else if model.isAcked(row) {
+            HStack(spacing: 6) {
+                Label("已确认", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.blue)
+                    .help("确认过差异：两边就这样，不再提醒；任一边再变会重新出现")
+                if row.kind == .handler {
+                    handlerMenu
+                }
+                Button {
+                    Task { await model.unacknowledge([row.id]) }
+                } label: {
+                    Label("取消确认", systemImage: "arrow.uturn.backward")
+                }
+                .fixedSize()
+                .help("取消确认，放回待同步")
+                diffButton
+                moreMenu
+            }
+            .controlSize(.regular)
+            .disabled(model.busy)
         } else {
             HStack(spacing: 6) {
                 ForEach(snapshot.machineOrder, id: \.self) { machine in
@@ -349,48 +357,37 @@ struct RowView: View {
                 if row.kind == .handler {
                     handlerMenu
                 }
-                if model.isAcked(row) {
-                    Button {
-                        Task { await model.unacknowledge([row.id]) }
-                    } label: {
-                        Label("取消确认", systemImage: "arrow.uturn.backward")
-                    }
-                    .help("取消确认，放回待同步")
-                } else {
-                    Button {
-                        Task { await model.acknowledge([row]) }
-                    } label: {
-                        Label("确认差异", systemImage: "checkmark")
-                    }
-                    .help("确认差异：两边就这样，不再提醒；任一边再变会重新出现")
-                }
-                if row.kind != .handler {
-                    Button {
-                        model.sheet = .diff(row)
-                    } label: {
-                        Image(systemName: "rectangle.split.2x1")
-                    }
-                    .help("左右对比")
-                    .accessibilityLabel("对比 \(row.name)")
-                }
-                Menu {
-                    if row.mergeable {
-                        Button("合并两边…") { model.sheet = .merge(row) }
-                    }
-                    if row.kind == .agent {
-                        Button("设为模板（两台参数不同）…") { model.sheet = .template(row) }
-                    }
-                    Button("不再同步这一项") { Task { await model.ignore(row) } }
+                Button {
+                    Task { await model.acknowledge([row]) }
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Label("确认差异", systemImage: "checkmark")
                 }
-                .menuIndicator(.hidden)
                 .fixedSize()
-                .help("更多")
+                .help("确认差异：两边就这样，不再提醒；任一边再变会重新出现")
+                diffButton
+                moreMenu
             }
             .controlSize(.regular)
             .disabled(model.busy)
         }
+    }
+
+    @ViewBuilder
+    private var moreMenu: some View {
+        Menu {
+            if row.mergeable {
+                Button("合并两边…") { model.sheet = .merge(row) }
+            }
+            if row.kind == .agent {
+                Button("设为模板（两台参数不同）…") { model.sheet = .template(row) }
+            }
+            Button("不再同步这一项") { Task { await model.ignore(row) } }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("更多")
     }
 
     @ViewBuilder
@@ -405,9 +402,9 @@ struct RowView: View {
             }
         }
         if row.suggested == machine {
-            Button(title, action: action).buttonStyle(.borderedProminent).help(help)
+            Button(title, action: action).buttonStyle(.borderedProminent).fixedSize().help(help)
         } else {
-            Button(title, action: action).buttonStyle(.bordered).help(help)
+            Button(title, action: action).buttonStyle(.bordered).fixedSize().help(help)
         }
     }
 

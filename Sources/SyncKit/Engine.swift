@@ -31,7 +31,6 @@ public actor Engine {
 
     private var files: FileProvider { FileProvider(config: shared, blobs: blobs) }
     private var handlers: HandlerProvider { HandlerProvider(config: shared, blobs: blobs) }
-    private var prefs: PrefProvider { PrefProvider(config: shared, blobs: blobs) }
     private var agents: AgentProvider { AgentProvider(config: shared, blobs: blobs, machine: me) }
 
     // MARK: 刷新
@@ -70,10 +69,9 @@ public actor Engine {
         try relay.uploadBlobs(refs, from: blobs)
         let report = await reportTask.value
         let now = Date()
-        let unreadable = prefs.blockedContainers().map(\.domain)
         let scope = Scope(shared)
         try relay.put([("machines/\(me)/state.json", try JSON.encode(StateDoc(machine: me, publishedAt: now, items: local,
-                                                                              report: report, unreadable: unreadable,
+                                                                              report: report,
                                                                               scope: scope)))])
         lastLocal = local
         lastPeer = meta.peer
@@ -81,14 +79,9 @@ public actor Engine {
         lastReport = report
 
         var rows: [Row] = []
-        var blockedApps: [String: [String]] = [:]
-        if !unreadable.isEmpty { blockedApps[me] = unreadable.map(AppNames.name(of:)) }
         if let peerDoc = meta.peer {
-            // 任一台读不到的 App：它的设置值未知，整个不参与对比，免得把「读不到」当成「没有」
-            let blind = Set(unreadable + (peerDoc.unreadable ?? []))
-            if let peerBlocked = peerDoc.unreadable, !peerBlocked.isEmpty { blockedApps[peer] = peerBlocked.map(AppNames.name(of:)) }
             // 两边都按现在的清单过滤：对面的状态可能是按旧清单扫的，清单外的条目不能当成「对面删了」
-            let inScope = { (id: String) in !self.shared.isIgnored(id) && Self.visible(id, blind: blind) && scope.rule(for: id) != nil }
+            let inScope = { (id: String) in !self.shared.isIgnored(id) && scope.rule(for: id) != nil }
             var peerItems = peerDoc.items.filter { inScope($0.key) }
             var local = local.filter { inScope($0.key) }
             // 规则和对面扫描时不一样的条目：对面的值不可信（可能只是还没扫），等它按新清单刷新
@@ -113,6 +106,16 @@ public actor Engine {
             }.map { id in
                 makeRow(id: id, status: nil, local: local[id], peer: peerItems[id], same: true)
             }
+            // 文件、目录、启动项也全量：两台一致的照样列出来，方便核对
+            rows += local.keys.filter { id in
+                let kind = ItemKind(id: id)
+                return (kind == .file || kind == .dir || kind == .agent)
+                    && result.diffs[id] == nil
+                    && peerItems[id] != nil
+                    && local[id]?.fpOrAbsent == peerItems[id]?.fpOrAbsent
+            }.map { id in
+                makeRow(id: id, status: nil, local: local[id], peer: peerItems[id], same: true)
+            }
             rows += outdatedStates.compactMap { id, states in
                 states.0?.fpOrAbsent == states.1?.fpOrAbsent ? nil
                     : makeRow(id: id, status: nil, local: states.0, peer: states.1)
@@ -128,7 +131,7 @@ public actor Engine {
                                 machines: config.machines,
                                 rows: rows, publishedAt: publishedAt, messages: messages,
                                 peerMissing: meta.peer == nil,
-                                reports: reports, shared: shared, blockedApps: blockedApps)
+                                reports: reports, shared: shared)
         snapshot.pendingRemovals = Set(meta.theirs.compactMap { d in
             d.item.hasPrefix(Self.uninstallPrefix) ? String(d.item.dropFirst(Self.uninstallPrefix.count)) : nil
         })
@@ -206,12 +209,6 @@ public actor Engine {
             messages.append("回执没写到中转站：\(error.localizedDescription)")
         }
         return messages
-    }
-
-    /// 偏好条目所在的域有一台读不到时不显示
-    private static func visible(_ id: String, blind: Set<String>) -> Bool {
-        guard ItemKind(id: id) == .pref, let (domain, _) = PrefProvider.parse(id) else { return true }
-        return !blind.contains(domain)
     }
 
     /// 中转站上的清单为准；中转站上还没有，就把本机的传上去
@@ -342,7 +339,6 @@ public actor Engine {
     private func scanAll(refs: inout Set<String>) throws -> [String: ItemState] {
         var out = try files.scanAll(refs: &refs)
         out.merge(try handlers.scanAll(refs: &refs)) { a, _ in a }
-        out.merge(try prefs.scanAll(refs: &refs)) { a, _ in a }
         out.merge(try agents.scanAll(refs: &refs)) { a, _ in a }
         return out.filter { !shared.isIgnored($0.key) }
     }
@@ -350,7 +346,6 @@ public actor Engine {
     private func scan(_ id: String, refs: inout Set<String>) async throws -> ItemState {
         switch ItemKind(id: id) {
         case .handler: return try handlers.scan(ext: itemKey(id), refs: &refs)
-        case .pref: return try prefs.scan(id, refs: &refs)
         case .agent: return try agents.scan(label: itemKey(id), refs: &refs)
         default: return try files.scan(id, refs: &refs)
         }
@@ -361,7 +356,6 @@ public actor Engine {
         try download(value, for: id)
         switch ItemKind(id: id) {
         case .handler: try await handlers.apply(ext: itemKey(id), value: value)
-        case .pref: try prefs.apply(id, value: value, backup: backup)
         case .agent: try agents.apply(label: itemKey(id), value: value, backup: backup)
         default: try files.apply(id, value: value, mode: mode, backup: backup)
         }
@@ -461,9 +455,6 @@ public actor Engine {
         switch ItemKind(id: id) {
         case .handler: return ("默认打开方式", "." + key)
         case .agent: return ("启动项（~/Library/LaunchAgents）", key)
-        case .pref:
-            guard let (domain, prefKey) = PrefProvider.parse(id) else { return ("App 设置", key) }
-            return ("App 设置 · \(AppNames.name(of: domain))", prefKey)
         default: break
         }
         if let spec = shared.dirs.first(where: { key.hasPrefix($0.path + "/") }) {
@@ -476,9 +467,6 @@ public actor Engine {
     private func title(of id: String) -> String {
         switch ItemKind(id: id) {
         case .handler: return "." + itemKey(id)
-        case .pref:
-            guard let (domain, key) = PrefProvider.parse(id) else { return itemKey(id) }
-            return "\(AppNames.name(of: domain)) · \(key)"
         default: return itemKey(id)
         }
     }

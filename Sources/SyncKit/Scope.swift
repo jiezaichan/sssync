@@ -7,21 +7,16 @@ struct Scope: Codable, Sendable, Equatable {
     var dirs: [DirSpec]
     var handlers: [String]
     var equivalentApps: [[String]]
-    var prefs: [PrefSpec]
     var launchAgents: Bool
     var templates: [String: [TemplateVar]]
-    /// 内置 + 自己补的噪音键；内置规则随版本变，两台版本不同时也要能看出来
-    var noiseKeys: [String]
 
     init(_ shared: SharedConfig) {
         files = shared.files
         dirs = shared.dirs
         handlers = shared.handlers
         equivalentApps = shared.equivalentApps
-        prefs = shared.prefs
         launchAgents = shared.launchAgents
         templates = shared.templates
-        noiseKeys = SharedConfig.builtinNoiseKeys + shared.noiseKeys
     }
 
     /// 管这个条目的规则；不归这份清单管时为 nil。
@@ -31,23 +26,16 @@ struct Scope: Codable, Sendable, Equatable {
         switch ItemKind(id: id) {
         case .file:
             if files.contains(key) { return "file" }
-            guard let (spec, name) = topLevel(key), !name.contains("/"), !Glob.matchAny(spec.ignore, name) else { return nil }
+            guard let (spec, name) = topLevel(key), !name.contains("/"),
+                  !isVersionControlDir(name), !Glob.matchAny(spec.ignore, name) else { return nil }
             return "file"
         case .dir:
-            guard let (spec, name) = topLevel(key), !name.contains("/"), !Glob.matchAny(spec.ignore, name) else { return nil }
+            guard let (spec, name) = topLevel(key), !name.contains("/"),
+                  !isVersionControlDir(name), !Glob.matchAny(spec.ignore, name) else { return nil }
             // 目录的值是成员清单，忽略规则一变值就变
             return "dir " + Self.text(spec.ignore.sorted())
         case .handler:
             return handlers.contains(key) ? "handler " + Self.text(equivalentApps) : nil
-        case .pref:
-            guard let (domain, prefKey) = PrefProvider.parse(id),
-                  let spec = prefs.first(where: { $0.domain == domain }) else { return nil }
-            if let keys = spec.keys {
-                guard keys.contains(prefKey) else { return nil }
-            } else if Glob.matchAny(noiseKeys, prefKey) || Glob.matchAny(spec.ignore, prefKey) {
-                return nil
-            }
-            return spec.container ? "pref container" : "pref"
         case .agent:
             // 模板变量决定本机的值换成什么占位符
             return launchAgents ? "agent " + Self.text(templates[key] ?? []) : nil

@@ -148,8 +148,6 @@ struct SyncListSettings: View {
     @State private var draft: SharedConfig?
     @State private var newFile = ""
     @State private var newDir = ""
-    @State private var newDomain = ""
-    @State private var newDomainContainer = false
 
     var body: some View {
         Group {
@@ -206,29 +204,6 @@ struct SyncListSettings: View {
                 Text("目录")
             } footer: {
                 Text("目录里每个顶层子目录算一项、每个顶层文件算一项。")
-            }
-
-            Section {
-                ForEach(draft.wrappedValue.prefs, id: \.self) { spec in
-                    let what = spec.keys.map { "\($0.count) 个键" } ?? "全部设置（过滤噪音）"
-                    removable("\(AppNames.name(of: spec.domain))  \(spec.domain)", detail: (spec.container ? "沙盒 · " : "") + what) {
-                        draft.wrappedValue.prefs.removeAll { $0 == spec }
-                    }
-                }
-                HStack {
-                    TextField("bundle id，如 com.googlecode.iterm2", text: $newDomain).textFieldStyle(.roundedBorder)
-                    Toggle("沙盒", isOn: $newDomainContainer).toggleStyle(.checkbox)
-                    Button("添加") {
-                        let d = newDomain.trimmingCharacters(in: .whitespaces)
-                        if !d.isEmpty { draft.wrappedValue.prefs.append(PrefSpec(domain: d, container: newDomainContainer)) }
-                        newDomain = ""
-                    }
-                    .disabled(newDomain.isEmpty)
-                }
-            } header: {
-                Text("App 设置（逐键）")
-            } footer: {
-                Text("不知道 App 的设置存在哪，用主窗口工具栏的「录制」。")
             }
 
             Section("启动项与默认打开方式") {

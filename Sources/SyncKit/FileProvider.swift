@@ -33,6 +33,7 @@ struct FileProvider: Sendable {
 
     func scan(_ id: String, refs: inout Set<String>) throws -> ItemState {
         let key = itemKey(id)
+        guard !isVersionControlPath(key) else { return .absent }
         switch ItemKind(id: id) {
         case .file:
             return try scanFile(Paths.expand(key), refs: &refs)
@@ -102,6 +103,7 @@ struct FileProvider: Sendable {
 
     func apply(_ id: String, value: String, mode: Int?, backup: Backup) throws {
         let url = Paths.expand(itemKey(id))
+        guard !isVersionControlPath(itemKey(id)) else { throw SyncError("不碰版本库目录：\(itemKey(id))") }
         let fm = FileManager.default
         switch ItemKind(id: id) {
         case .file:
@@ -155,7 +157,12 @@ struct FileProvider: Sendable {
     }
 
     private func isIgnored(name: String, relative: String, spec: DirSpec) -> Bool {
-        Glob.matchAny(spec.ignore, name) || Glob.matchAny(spec.ignore, relative)
+        isVersionControlDir(name) || Glob.matchAny(spec.ignore, name) || Glob.matchAny(spec.ignore, relative)
+    }
+
+    /// 条目路径里带 `.git` 的一律不碰（清单配置改过之后遗留的待办也不能落到版本库上）
+    private func isVersionControlPath(_ path: String) -> Bool {
+        path.split(separator: "/").contains { isVersionControlDir(String($0)) }
     }
 
     private func mode(of url: URL) -> Int? {

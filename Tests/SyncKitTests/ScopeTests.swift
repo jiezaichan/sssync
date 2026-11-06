@@ -6,8 +6,7 @@ final class ScopeTests: XCTestCase {
         files: ["~/.zshrc"],
         dirs: [DirSpec(path: "~/.claude/skills", ignore: [".git"])],
         handlers: ["json"], equivalentApps: [],
-        prefs: [PrefSpec(domain: "com.a", ignore: ["Tmp*"]), PrefSpec(domain: "com.b", keys: ["Only"])],
-        launchAgents: true, templates: [:], secretFiles: [], noiseKeys: [], ignored: []
+        launchAgents: true, templates: [:], secretFiles: [], ignored: []
     )
 
     func testRuleCoversWhatScanningCovers() {
@@ -17,22 +16,18 @@ final class ScopeTests: XCTestCase {
         XCTAssertNotNil(scope.rule(for: "dir:~/.claude/skills/foo"))
         XCTAssertNil(scope.rule(for: "dir:~/.claude/skills/.git"))
         XCTAssertNil(scope.rule(for: "file:~/.other"))
-        XCTAssertNotNil(scope.rule(for: "pref:com.a#Theme"))
-        XCTAssertNil(scope.rule(for: "pref:com.a#TmpPath"))
-        XCTAssertNil(scope.rule(for: "pref:com.a#NSWindow Frame Main"))
-        XCTAssertNotNil(scope.rule(for: "pref:com.b#Only"))
-        XCTAssertNil(scope.rule(for: "pref:com.b#Other"))
-        XCTAssertNil(scope.rule(for: "pref:com.c#Theme"))
         XCTAssertNotNil(scope.rule(for: "handler:json"))
         XCTAssertNotNil(scope.rule(for: "agent:x"))
     }
 
-    /// 本机加了忽略规则：对面旧状态里的这个键不再归清单管，不能被当成「本机删了」推过去
-    func testNewIgnoreTakesKeyOutOfScope() {
-        var changed = base
-        changed.prefs[0].ignore.append("Theme")
-        XCTAssertNotNil(Scope(base).rule(for: "pref:com.a#Theme"))
-        XCTAssertNil(Scope(changed).rule(for: "pref:com.a#Theme"))
+    /// 清单没写 .git 也不归它管：版本库元数据永远排除
+    func testVersionControlDirNeverInScope() {
+        var config = base
+        config.dirs = [DirSpec(path: "~/.config/zsh", ignore: ["local.zsh"])]
+        let scope = Scope(config)
+        XCTAssertNil(scope.rule(for: "dir:~/.config/zsh/.git"))
+        XCTAssertNil(scope.rule(for: "file:~/.config/zsh/.git"))
+        XCTAssertNotNil(scope.rule(for: "dir:~/.config/zsh/bin"))
     }
 
     /// 规则变了的条目两台算出来不同，对面的值要当成未知
@@ -46,7 +41,6 @@ final class ScopeTests: XCTestCase {
         XCTAssertNotEqual(old.rule(for: "file:~/.gitconfig"), new.rule(for: "file:~/.gitconfig"))
         XCTAssertNotEqual(old.rule(for: "agent:x"), new.rule(for: "agent:x"))
         XCTAssertEqual(old.rule(for: "file:~/.zshrc"), new.rule(for: "file:~/.zshrc"))
-        XCTAssertEqual(old.rule(for: "pref:com.a#Theme"), new.rule(for: "pref:com.a#Theme"))
     }
 
     func testOldStateDocDecodesWithoutScope() throws {

@@ -34,7 +34,12 @@ struct AgentProvider: Sendable {
         let text = Template.templatize(xml, vars: vars, machine: machine)
         let hash = try blobs.put(Data(text.utf8))
         refs.insert(hash)
-        var summary = Self.program(plist).map { URL(filePath: $0).lastPathComponent } ?? "启动项"
+        let program = Self.program(plist)
+        var summary = program.map { URL(filePath: $0).lastPathComponent } ?? "启动项"
+        // 解释器 / 可执行文件被删或挪走时，launchd 会一直起不来，界面上直接标出来
+        if let program, !FileManager.default.fileExists(atPath: program) {
+            summary += " · ⚠️ 程序不存在"
+        }
         if !vars.isEmpty { summary += " · 模板" }
         return ItemState(fp: hash, summary: summary)
     }

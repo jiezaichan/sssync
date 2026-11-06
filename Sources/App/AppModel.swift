@@ -5,7 +5,7 @@ import SyncKit
 import UserNotifications
 
 enum SidebarItem: Hashable {
-    case pending, waiting, acknowledged, env, apps, files, prefs, agents, handlers
+    case pending, waiting, acknowledged, env, apps, files, agents, handlers
 }
 
 struct RowGroup: Identifiable {
@@ -27,7 +27,6 @@ enum ActiveSheet: Identifiable {
     case merge(Row)
     case template(Row)
     case command(CommandJob)
-    case record
 
     var id: String {
         switch self {
@@ -35,7 +34,6 @@ enum ActiveSheet: Identifiable {
         case .merge(let row): return "merge-" + row.id
         case .template(let row): return "template-" + row.id
         case .command(let job): return "command-" + job.id.uuidString
-        case .record: return "record"
         }
     }
 }
@@ -332,8 +330,10 @@ final class AppModel {
         case .env: return openRows(envSections.filter { $0.id != "errors" }).count
         case .apps: return openRows(appSections).count
         case .acknowledged: return rows(for: .acknowledged).count + ackedReportSections.reduce(0) { $0 + $1.rows.count }
-        // 默认打开方式列表里有一致项，角标只数差异
-        case .handlers: return rows(for: .handlers).filter { $0.status != .same }.count
+        // 默认打开方式列表里有一致项和已确认的差异，角标只数还要处理的
+        case .handlers: return rows(for: .handlers).filter { $0.status != .same && !isAcked($0) }.count
+        // 「文件」和「启动项」列出全部条目，角标只数不一致、还没确认的
+        case .files, .agents: return rows(for: item).filter { $0.status != .same && !isAcked($0) }.count
         default: return rows(for: item).count
         }
     }
@@ -367,19 +367,20 @@ final class AppModel {
 
     private func rows(for item: SidebarItem) -> [Row] {
         let everything = snapshot?.rows ?? []
-        if item == .acknowledged {
+        switch item {
+        case .acknowledged:
             return everything.filter { $0.status != .same && !$0.status.isWaiting && isAcked($0) }
+        // 这三个分类列全量：两台一致的和确认过差异的都留着，随时能回看
+        case .files: return everything.filter { $0.kind == .file || $0.kind == .dir }
+        case .agents: return everything.filter { $0.kind == .agent }
+        case .handlers: return everything.filter { $0.kind == .handler }
+        default: break
         }
         let all = everything.filter { !isAcked($0) }
         switch item {
         case .pending: return all.filter { $0.status != .same && !$0.status.isWaiting }
         case .waiting: return all.filter { $0.status != .same && $0.status.isWaiting }
-        case .acknowledged: return []
-        case .files: return all.filter { $0.status != .same && ($0.kind == .file || $0.kind == .dir) }
-        case .prefs: return all.filter { $0.status != .same && $0.kind == .pref }
-        case .agents: return all.filter { $0.status != .same && $0.kind == .agent }
-        case .handlers: return all.filter { $0.kind == .handler }
-        case .env, .apps: return []
+        default: return []
         }
     }
 }

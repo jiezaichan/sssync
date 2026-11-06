@@ -89,7 +89,6 @@ final class SupportTests: XCTestCase {
     func testSharedConfigDecodesOldFileWithDefaults() throws {
         let shared = try JSON.decode(SharedConfig.self, Data(#"{"files": ["~/a"]}"#.utf8))
         XCTAssertEqual(shared.files, ["~/a"])
-        XCTAssertEqual(shared.noiseKeys, SharedConfig.standard.noiseKeys)
     }
 
     func testParseSectionsDropsBanner() {

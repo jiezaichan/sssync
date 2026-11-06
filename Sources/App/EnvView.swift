@@ -7,7 +7,7 @@ struct EnvList: View {
     @Environment(AppModel.self) private var model
     let sections: [EnvSection]
     let emptyText: String
-    @State private var onlyDiff = true
+    @State private var onlyDiff = false
     @State private var search = ""
 
     var body: some View {

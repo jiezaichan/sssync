@@ -20,9 +20,9 @@ public struct ItemState: Codable, Sendable, Equatable {
     public var fpOrAbsent: String { fp ?? absentFP }
 }
 
-/// 条目 id：`file:~/x`、`dir:~/x`、`handler:json`、`pref:<域>#<键>`、`agent:<label>`
+/// 条目 id：`file:~/x`、`dir:~/x`、`handler:json`、`agent:<label>`
 public enum ItemKind: String, Sendable {
-    case file, dir, handler, pref, agent
+    case file, dir, handler, agent
 
     init?(id: String) {
         guard let colon = id.firstIndex(of: ":") else { return nil }
@@ -42,8 +42,6 @@ struct StateDoc: Codable, Sendable {
     var items: [String: ItemState]
     /// 环境与应用的只读报告；旧版本发布的状态里没有
     var report: MachineReport?
-    /// 这台读不到的偏好域（沙盒被挡）：这些域的条目不知道值，不能当成「不存在」
-    var unreadable: [String]?
     /// 扫描时用的规则；旧版本发布的状态里没有
     var scope: Scope?
 }
@@ -138,8 +136,6 @@ public struct Snapshot: Sendable {
     /// 机器 → 环境与应用报告
     public let reports: [String: MachineReport]
     public let shared: SharedConfig
-    /// 机器 → 读不到的沙盒 App 名（需要在那台上给 sssync 开完全磁盘访问）
-    public let blockedApps: [String: [String]]
     /// 已经让对面卸载、对面还没执行的环境 / 应用行（`EnvRow.id`）
     public var pendingRemovals: Set<String> = []
 

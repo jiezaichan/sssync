@@ -109,6 +109,9 @@ public struct Config: Codable, Sendable {
 
 // MARK: - 两台共用的同步清单
 
+/// 版本库元数据目录：任何受管目录里都不扫描、不对比，不依赖清单的 ignore 配置
+public func isVersionControlDir(_ name: String) -> Bool { name == ".git" }
+
 /// 一个受管目录：它的每个顶层子目录聚合成一个条目，顶层文件各自是一个条目
 public struct DirSpec: Codable, Sendable, Equatable, Hashable {
     public var path: String
@@ -117,25 +120,6 @@ public struct DirSpec: Codable, Sendable, Equatable, Hashable {
 
     public init(path: String, ignore: [String]) {
         self.path = path
-        self.ignore = ignore
-    }
-}
-
-/// 一个 App 的偏好域，逐键同步
-public struct PrefSpec: Codable, Sendable, Equatable, Hashable {
-    /// 偏好域，一般就是 bundle id
-    public var domain: String
-    /// 沙盒 App：偏好在 `~/Library/Containers/<域>/Data/Library/Preferences/<域>.plist`
-    public var container: Bool
-    /// 只同步这些键；nil 表示全部（过滤噪音后）
-    public var keys: [String]?
-    /// 这个域额外忽略的键（通配）
-    public var ignore: [String]
-
-    public init(domain: String, container: Bool = false, keys: [String]? = nil, ignore: [String] = []) {
-        self.domain = domain
-        self.container = container
-        self.keys = keys
         self.ignore = ignore
     }
 }
@@ -160,31 +144,12 @@ public struct SharedConfig: Codable, Sendable, Equatable {
     public var handlers: [String]
     /// 视为同一个 App 的 bundle id 组，组内第一个是规范名
     public var equivalentApps: [[String]]
-    public var prefs: [PrefSpec]
     /// 是否管理 `~/Library/LaunchAgents`
     public var launchAgents: Bool
     /// 启动项 label → 模板变量（同名不同参）
     public var templates: [String: [TemplateVar]]
     /// 含密钥的文件（通配，对路径）：对比时值打码
     public var secretFiles: [String]
-    /// 自己补的噪音键（通配），所有 App 通用；内置规则见 `builtinNoiseKeys`
-    public var noiseKeys: [String]
-
-    /// 内置噪音键：窗口位置、最近打开、更新检查、版本号、统计……随代码更新，不存进清单
-    public static let builtinNoiseKeys = [
-        "NSWindow Frame *", "NSSplitView *", "NSToolbar *", "NSNavLastRootDirectory", "NSNavPanel*",
-        "NSRecentDocuments*", "NSStatusItem *", "NSTableView *", "NSOutlineView *", "NSOSPLastRootDirectory",
-        "NSOverlayScrollers*", "SU*", "*Sparkle*", "*LastLaunch*", "*Telemetry*", "*Analytics*", "*LastCheck*",
-        "*lastCheck*", "*LaunchCount*", "*launchCount*", "*WindowFrame*", "*WindowState*", "*Version", "*version",
-        "*Migrated*", "findMode*", "MSAppCenter*", "com.apple.*", "*FirstLaunch*", "*Onboarding*", "*DeviceID*",
-        "*deviceId*", "*InstallDate*", "*LastUsed*", "*lastUsed*", "Bugsnag*", "*UserId", "*UserID", "*-id",
-        "*session*", "*Session*", "*prompted*", "*review*", "*-dates", "*-date", "*Date",
-    ]
-
-    /// 内置 + 自己补的
-    public func isNoiseKey(_ key: String) -> Bool {
-        Glob.matchAny(Self.builtinNoiseKeys, key) || Glob.matchAny(noiseKeys, key)
-    }
 
     /// 不再同步的条目 id（通配）：不管怎么变都不管
     public var ignored: [String]
@@ -212,19 +177,14 @@ public struct SharedConfig: Codable, Sendable, Equatable {
         dirs: [
             DirSpec(path: "~/.claude/skills", ignore: [
                 ".git", ".DS_Store", "node_modules", "__pycache__", ".venv", ".bsk.lock",
-                "db-query/scripts/.env", "depu/.pane", "depu/.pane.nick",
             ]),
-            // local.zsh 是本机专属的约定位置：共用的 zshrc 最后 source 它，永不同步
+            // 只有本机专属的文件不参与对比；其余（含 .env）全部进对比，有差异就显示
             DirSpec(path: "~/.config/zsh", ignore: [
-                ".git", ".DS_Store", "local.zsh", "history.zsh", "*.zwc", ".zcompdump*",
+                "local.zsh", "history.zsh",
             ]),
         ],
         handlers: ["json", "md", "yaml", "yml", "toml", "txt", "log", "csv", "xml", "js", "ts", "py", "sh", "swift"],
         equivalentApps: [["dev.zed.Zed", "dev.zed-i18n.Zed"]],
-        prefs: [
-            PrefSpec(domain: "im.manico.Manico", container: true),
-            PrefSpec(domain: "com.googlecode.iterm2", ignore: ["NoSync*", "NeverWarnAbout*", "Window Arrangements"]),
-        ],
         launchAgents: true,
         templates: [
             "com.jiezaichan.rtunnel-new": [
@@ -236,26 +196,23 @@ public struct SharedConfig: Codable, Sendable, Equatable {
             ],
         ],
         secretFiles: ["*/secrets.zsh", "*/.env", "*/.env.*"],
-        noiseKeys: [],
         ignored: [
             "agent:com.google.*", "agent:com.citrolabs.*", "agent:com.topazlabs.*",
             "agent:com.microsoft.*", "agent:homebrew.*", "agent:io.github.clash-verge-rev.*",
         ]
     )
 
-    public init(files: [String], dirs: [DirSpec], handlers: [String], equivalentApps: [[String]], prefs: [PrefSpec],
-                launchAgents: Bool, templates: [String: [TemplateVar]], secretFiles: [String], noiseKeys: [String],
+    public init(files: [String], dirs: [DirSpec], handlers: [String], equivalentApps: [[String]],
+                launchAgents: Bool, templates: [String: [TemplateVar]], secretFiles: [String],
                 ignored: [String], acknowledged: [String: String] = [:]) {
         self.acknowledged = acknowledged
         self.files = files
         self.dirs = dirs
         self.handlers = handlers
         self.equivalentApps = equivalentApps
-        self.prefs = prefs
         self.launchAgents = launchAgents
         self.templates = templates
         self.secretFiles = secretFiles
-        self.noiseKeys = noiseKeys
         self.ignored = ignored
     }
 
@@ -267,11 +224,9 @@ public struct SharedConfig: Codable, Sendable, Equatable {
         dirs = try c.decodeIfPresent([DirSpec].self, forKey: .dirs) ?? s.dirs
         handlers = try c.decodeIfPresent([String].self, forKey: .handlers) ?? s.handlers
         equivalentApps = try c.decodeIfPresent([[String]].self, forKey: .equivalentApps) ?? s.equivalentApps
-        prefs = try c.decodeIfPresent([PrefSpec].self, forKey: .prefs) ?? s.prefs
         launchAgents = try c.decodeIfPresent(Bool.self, forKey: .launchAgents) ?? s.launchAgents
         templates = try c.decodeIfPresent([String: [TemplateVar]].self, forKey: .templates) ?? s.templates
         secretFiles = try c.decodeIfPresent([String].self, forKey: .secretFiles) ?? s.secretFiles
-        noiseKeys = try c.decodeIfPresent([String].self, forKey: .noiseKeys) ?? s.noiseKeys
         ignored = try c.decodeIfPresent([String].self, forKey: .ignored) ?? s.ignored
         acknowledged = try c.decodeIfPresent([String: String].self, forKey: .acknowledged) ?? [:]
     }
@@ -297,11 +252,9 @@ public struct SharedConfig: Codable, Sendable, Equatable {
         take(\.dirs)
         take(\.handlers)
         take(\.equivalentApps)
-        take(\.prefs)
         take(\.launchAgents)
         take(\.templates)
         take(\.secretFiles)
-        take(\.noiseKeys)
         take(\.ignored)
         take(\.acknowledged)
     }

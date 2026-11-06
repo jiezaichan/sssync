@@ -23,8 +23,9 @@ public struct EnvRow: Identifiable, Sendable {
     public let name: String
     /// 机器 → 显示的值；没有这个键表示那台没有
     public let values: [String: String]
-    public let same: Bool
-    public let note: String?
+    /// 两边一样：值相同，或者 PATH 这类「两台都有就算一致」的项
+    public var same: Bool
+    public var note: String?
     /// 机器 → 在那台上补齐的办法
     public let fixes: [String: Fix]
     /// 机器 → 在那台上卸载的办法；只给「这台有、另一台没有」的
@@ -151,12 +152,21 @@ public enum EnvCompare {
             return row
         }, footer: "登录 shell（zsh -lic）生效后的值，密钥已打码。要改去改 ~/.config/zsh 里的文件；只属于一台的放 local.zsh，会自动标成本机专属"))
 
-        // PATH：按第一台的顺序，再补另一台独有的
+        // PATH：按第一台的顺序，再补另一台独有的。两台都有只是序号不同不算差异，
+        // local.zsh 里加的目录自动标本机专属
         var pathOrder: [String] = []
         for m in machines { for p in reports[m]?.path ?? [] where !pathOrder.contains(p) { pathOrder.append(p) } }
+        let localPath = Set(machines.flatMap { reports[$0]?.localPath ?? [] })
         sections.append(EnvSection(id: "path", title: "PATH", systemImage: "point.topleft.down.to.point.bottomright.curvepath", rows: pathOrder.map { p in
-            row("path-\(p)", p, machines) { m in reports[m]?.path.firstIndex(of: p).map { "第 \($0 + 1) 项" } }
-        }, footer: nil))
+            var row = row("path-\(p)", p, machines) { m in reports[m]?.path.firstIndex(of: p).map { "第 \($0 + 1) 项" } }
+            if row.values.count == machines.count {
+                let indexes = machines.compactMap { reports[$0]?.path.firstIndex(of: p) }
+                if Set(indexes).count > 1 { row.note = "两台顺序不同" }
+                row.same = true
+            }
+            row.localOnly = !row.same && localPath.contains(p)
+            return row
+        }, footer: "顺序不同不算差异；只在一台 PATH 里的目录算差异，local.zsh 里加的会自动标成本机专属"))
 
         let errors = machines.flatMap { m in (reports[m]?.errors ?? []).map { "\(m)：\($0)" } }
         if !errors.isEmpty {

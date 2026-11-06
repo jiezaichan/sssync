@@ -102,11 +102,12 @@ final class SupportTests: XCTestCase {
 
 final class EnvCompareTests: XCTestCase {
     func report(node: [String: [String: String]], formulae: [String: String], apps: [AppInfo] = [],
-                env: [String: String] = ["A": "1"], localEnv: [String]? = nil) -> MachineReport {
+                env: [String: String] = ["A": "1"], path: [String] = ["/bin"],
+                localEnv: [String]? = nil, localPath: [String]? = nil) -> MachineReport {
         MachineReport(collectedAt: Date(), macOS: "27.2", tools: ["git": "2.54"],
                       node: NodeReport(nvm: "0.40", versions: ["22.23.3"], defaultVersion: "22.23.3", globals: node),
-                      pythons: [], uvTools: [:], formulae: formulae, casks: [:], env: env, path: ["/bin"],
-                      apps: apps, errors: [], localEnv: localEnv)
+                      pythons: [], uvTools: [:], formulae: formulae, casks: [:], env: env, path: path,
+                      apps: apps, errors: [], localEnv: localEnv, localPath: localPath)
     }
 
     func testGlobalPackagesComparedByPackageNotNodeDir() {
@@ -173,5 +174,32 @@ final class EnvCompareTests: XCTestCase {
         (( $#_om_cft )) && export OM_CHROME="$_om_cft[1]"
         """.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertEqual(ReportCollector.localEnvNames(at: url.path), ["ADB_MDNS", "GITLAB3_TOKEN", "JENKINS_JOBS", "OM_CHROME"])
+    }
+
+    func testPathOrderDifferenceIsNotADiff() {
+        let home = report(node: [:], formulae: [:], path: ["/a", "/bin"], localPath: ["/a"])
+        let work = report(node: [:], formulae: [:], path: ["/bin"])
+        let rows = EnvCompare.environment(["home": home, "work": work], machines: ["home", "work"])
+            .first { $0.id == "path" }!.rows
+        XCTAssertTrue(rows.first { $0.name == "/bin" }!.same)
+        let only = rows.first { $0.name == "/a" }!
+        XCTAssertFalse(only.same)
+        XCTAssertTrue(only.localOnly)
+    }
+
+    func testLocalPathEntriesExpandsHomeAndSkipsPATH() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("local-\(UUID().uuidString).zsh")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try """
+        export PATH="$HOME/bin:$PATH"
+        export PATH="/opt/foo/bin:${PATH}"
+        (( $#x )) && export PATH="$HOME/.local/bin:$PATH"
+        export PATH='$HOME/quoted/bin:$PATH'
+        export PATH="$(brew --prefix)/bin:$PATH"
+        """.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(ReportCollector.localPathEntries(at: url.path),
+                       [NSHomeDirectory() + "/bin", "/opt/foo/bin", NSHomeDirectory() + "/.local/bin", NSHomeDirectory() + "/quoted/bin"])
+        // PATH 不算环境变量那一栏的「本机专属」，它自己那一段处理
+        XCTAssertEqual(ReportCollector.localEnvNames(at: url.path), [])
     }
 }

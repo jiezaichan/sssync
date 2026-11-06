@@ -48,6 +48,8 @@ public struct MachineReport: Codable, Sendable {
     public var errors: [String]
     /// 本机 `local.zsh` 里 export 的变量名：故意只属于这台，不参与差异
     public var localEnv: [String]? = nil
+    /// 本机 `local.zsh` 往 PATH 里加的目录：故意只属于这台，不参与差异
+    public var localPath: [String]? = nil
 }
 
 /// 采集本机报告：一次 `zsh -lic` 拿到 shell 能看到的一切，其余直接读文件
@@ -120,15 +122,42 @@ enum ReportCollector {
             path: path,
             apps: apps(caskApps: caskApps((sections["CASKAPPS"] ?? []).joined(separator: "\n")), shared: shared),
             errors: errors,
-            localEnv: localEnvNames()
+            localEnv: localEnvNames(),
+            localPath: localPathEntries()
         )
     }
 
-    /// `local.zsh` 里 `export X=...` 的变量名。多行字符串里的内容不算，PATH 也不管；
-    /// 也认 `条件 && export X=...` 这种写法
+    /// `local.zsh` 里 `export X=...` 的变量名。多行字符串里的内容不算；PATH 单独走
+    /// `localPathEntries`，这里不返回
     static func localEnvNames(at path: String = NSHomeDirectory() + "/.config/zsh/local.zsh") -> [String] {
+        Set(localExports(at: path).map(\.0).filter { $0 != "PATH" }).sorted()
+    }
+
+    /// `local.zsh` 往 PATH 里加的目录，展开 `~` 和 `$HOME`；`$PATH` 本身、命令替换算不出来的一律跳过
+    static func localPathEntries(at path: String = NSHomeDirectory() + "/.config/zsh/local.zsh") -> [String] {
+        let home = NSHomeDirectory()
+        var out: [String] = []
+        for (name, value) in localExports(at: path) where name == "PATH" {
+            for part in value.split(separator: ":") {
+                var dir = String(part)
+                if dir == "~" {
+                    dir = home
+                } else if dir.hasPrefix("~/") {
+                    dir = home + dir.dropFirst()
+                }
+                for token in ["$HOME", "${HOME}"] { dir = dir.replacingOccurrences(of: token, with: home) }
+                guard dir.hasPrefix("/"), !out.contains(dir) else { continue }
+                out.append(dir)
+            }
+        }
+        return out
+    }
+
+    /// `local.zsh` 里每一行 `export 名字=值` 的名字和值（已去外层引号）。跳过 `#` 注释、
+    /// 多行字符串内容；也认 `条件 && export X=...` 这种写法
+    private static func localExports(at path: String) -> [(String, String)] {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
-        var names = Set<String>()
+        var out: [(String, String)] = []
         for raw in text.split(separator: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.hasPrefix("#"), let export = line.range(of: "export ") else { continue }
@@ -137,11 +166,14 @@ enum ReportCollector {
             let rest = line[export.upperBound...]
             guard let eq = rest.firstIndex(of: "=") else { continue }
             let name = rest[..<eq].trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, name != "PATH",
-                  name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { continue }
-            names.insert(name)
+            guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { continue }
+            var value = String(rest[rest.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            if value.count >= 2, let f = value.first, let l = value.last, f == l, f == "\"" || f == "'" {
+                value = String(value.dropFirst().dropLast())
+            }
+            out.append((name, value))
         }
-        return names.sorted()
+        return out
     }
 
     private static var script: String {

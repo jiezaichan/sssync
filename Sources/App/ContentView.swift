@@ -90,8 +90,8 @@ struct ContentView: View {
     }
 
     private var waitingTitle: String {
-        guard let s = model.snapshot else { return "等对面应用" }
-        return "等\(s.label(s.peer))应用"
+        guard let s = model.snapshot else { return "等对面" }
+        return "等\(s.label(s.peer))"
     }
 }
 
@@ -109,7 +109,7 @@ struct StatusBar: View {
             }
             .help("待同步 \(model.count(.pending)) · 开发环境 \(model.count(.env)) · 应用 \(model.count(.apps))。拍板、补齐或确认差异都会让它变少")
             if model.count(.waiting) > 0, let s = model.snapshot {
-                Text("\(model.count(.waiting)) 项等\(s.label(s.peer))应用")
+                Text("\(model.count(.waiting)) 项在等\(s.label(s.peer))")
                     .font(.callout)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
@@ -329,6 +329,10 @@ struct RowView: View {
         if row.status == .waiting {
             Label("已拍板，等\(snapshot.label(snapshot.peer))应用", systemImage: "clock")
                 .foregroundStyle(.secondary)
+        } else if row.status == .peerOutdated {
+            Label("清单改过，等\(snapshot.label(snapshot.peer))按新清单刷新", systemImage: "arrow.clockwise")
+                .foregroundStyle(.secondary)
+                .help("\(snapshot.label(snapshot.peer))上次是按旧清单扫描的，它那边的值还不知道")
         } else {
             HStack(spacing: 6) {
                 ForEach(snapshot.machineOrder, id: \.self) { machine in
@@ -442,6 +446,8 @@ struct StatusTag: View {
             return ("首次对比", .gray)
         case .waiting:
             return ("等\(snapshot.label(snapshot.peer))应用", .gray)
+        case .peerOutdated:
+            return ("等\(snapshot.label(snapshot.peer))刷新", .gray)
         }
     }
 }

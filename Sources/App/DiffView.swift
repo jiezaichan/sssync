@@ -40,10 +40,10 @@ struct DiffSheet: View {
             if row.secret {
                 Label("密钥已打码", systemImage: "lock.fill").font(.callout).foregroundStyle(.secondary)
             }
-            if row.mergeable && row.status != .waiting {
+            if row.mergeable && !row.status.isWaiting {
                 Button("合并两边…") { model.sheet = .merge(row) }
             }
-            if row.status != .waiting {
+            if !row.status.isWaiting {
                 ForEach(snapshot.machineOrder, id: \.self) { machine in
                     let title = snapshot.arrow(machine, text: "以\(snapshot.label(machine))为准")
                     if row.suggested == machine {

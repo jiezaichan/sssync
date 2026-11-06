@@ -12,7 +12,17 @@ struct Relay: Sendable {
     let host: String
     let path: String
 
-    private static let sshOptions = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+    /// 连上后网络断了，15 秒内发现并退出，不会一直挂着。
+    /// 一次刷新要连好几次，复用一条连接；ControlPath 放本用户临时目录，路径短（Unix socket 路径上限 104 字节）、没有空格（rsync 的 -e 按空格拆）
+    private static let sshOptions = [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3",
+        "-o", "ControlMaster=auto", "-o", "ControlPersist=60",
+        "-o", "ControlPath=" + FileManager.default.temporaryDirectory.path(percentEncoded: false).trimmingSuffix("/") + "/sssync-%n",
+    ]
+    /// 单条命令的总时限；传内容的 rsync 放宽些
+    private static let sshTimeout: TimeInterval = 45
+    private static let rsyncTimeout: TimeInterval = 180
 
     struct Meta: Sendable {
         var peer: StateDoc?
@@ -27,12 +37,29 @@ struct Relay: Sendable {
 
     @discardableResult
     func ssh(_ command: String) throws -> String {
-        try Shell.run("/usr/bin/ssh", Self.sshOptions + [host, command])
+        try retrying { try Shell.run("/usr/bin/ssh", Self.sshOptions + [host, command], timeout: Self.sshTimeout) }
     }
 
     private func rsync(_ arguments: [String]) throws {
         let ssh = (["/usr/bin/ssh"] + Self.sshOptions).joined(separator: " ")
-        try Shell.run("/usr/bin/rsync", ["-e", ssh] + arguments)
+        try retrying { try Shell.run("/usr/bin/rsync", ["-e", ssh] + arguments, timeout: Self.rsyncTimeout) }
+    }
+
+    /// 失败多半是复用的连接已经死了（睡眠、切网）：关掉它重连一次。中转站上的操作都可以重做
+    @discardableResult
+    private func retrying<T>(_ work: () throws -> T) throws -> T {
+        do {
+            return try work()
+        } catch {
+            _ = try? Shell.run("/usr/bin/ssh", Self.sshOptions + ["-O", "exit", host], timeout: 10)
+            return try work()
+        }
+    }
+
+    /// 中转站上的同步清单；还没有（或读不懂）时为 nil，和 `fetchMeta` 一样
+    func fetchShared() throws -> SharedConfig? {
+        let text = try ssh("cat \(path)/shared.json 2>/dev/null; true").trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : try? JSON.decode(SharedConfig.self, Data(text.utf8))
     }
 
     private func remote(_ sub: String) -> String { "\(host):\(path)/\(sub)" }

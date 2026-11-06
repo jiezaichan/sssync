@@ -71,8 +71,10 @@ public actor Engine {
         let report = await reportTask.value
         let now = Date()
         let unreadable = prefs.blockedContainers().map(\.domain)
+        let scope = Scope(shared)
         try relay.put([("machines/\(me)/state.json", try JSON.encode(StateDoc(machine: me, publishedAt: now, items: local,
-                                                                              report: report, unreadable: unreadable)))])
+                                                                              report: report, unreadable: unreadable,
+                                                                              scope: scope)))])
         lastLocal = local
         lastPeer = meta.peer
         lastBase = meta.base
@@ -85,14 +87,28 @@ public actor Engine {
             // 任一台读不到的 App：它的设置值未知，整个不参与对比，免得把「读不到」当成「没有」
             let blind = Set(unreadable + (peerDoc.unreadable ?? []))
             if let peerBlocked = peerDoc.unreadable, !peerBlocked.isEmpty { blockedApps[peer] = peerBlocked.map(AppNames.name(of:)) }
-            let peerItems = peerDoc.items.filter { !shared.isIgnored($0.key) && Self.visible($0.key, blind: blind) }
-            let local = local.filter { Self.visible($0.key, blind: blind) }
+            // 两边都按现在的清单过滤：对面的状态可能是按旧清单扫的，清单外的条目不能当成「对面删了」
+            let inScope = { (id: String) in !self.shared.isIgnored(id) && Self.visible(id, blind: blind) && scope.rule(for: id) != nil }
+            var peerItems = peerDoc.items.filter { inScope($0.key) }
+            var local = local.filter { inScope($0.key) }
+            // 规则和对面扫描时不一样的条目：对面的值不可信（可能只是还没扫），等它按新清单刷新
+            let peerScope = peerDoc.scope ?? scope
+            let outdated = Set(local.keys).union(peerItems.keys).filter { scope.rule(for: $0) != peerScope.rule(for: $0) }
+            var outdatedStates: [String: (ItemState?, ItemState?)] = [:]
+            for id in outdated {
+                outdatedStates[id] = (local.removeValue(forKey: id), peerItems.removeValue(forKey: id))
+            }
             let result = Reconciler.reconcile(local: local, peer: peerItems, base: meta.base,
                                               pending: Set(meta.theirs.map(\.item)))
             try writeBase(result.converged)
             rows = result.diffs.map { id, status in
                 makeRow(id: id, status: status, local: local[id], peer: peerItems[id])
-            }.sorted { ($0.group, $0.name) < ($1.group, $1.name) }
+            }
+            rows += outdatedStates.compactMap { id, states in
+                states.0?.fpOrAbsent == states.1?.fpOrAbsent ? nil
+                    : makeRow(id: id, status: nil, local: states.0, peer: states.1)
+            }
+            rows.sort { ($0.group, $0.name) < ($1.group, $1.name) }
         }
 
         var publishedAt = [me: now]
@@ -202,8 +218,10 @@ public actor Engine {
         }
     }
 
-    /// 改同步清单：两台共用，传到中转站
-    public func updateShared(_ new: SharedConfig) throws {
+    /// 改同步清单：两台共用，传到中转站。在中转站上最新的那份上改，本机缓存可能是旧的，整份写回会盖掉对面刚改的
+    public func updateShared(_ change: @Sendable (inout SharedConfig) -> Void) throws {
+        var new = try relay.fetchShared() ?? shared
+        change(&new)
         try relay.put([("shared.json", try JSON.line(new))])
         shared = new
         try shared.saveCache()
@@ -394,10 +412,12 @@ public actor Engine {
         for (item, fp) in entries { lastBase[item] = fp }
     }
 
-    private func makeRow(id: String, status: DiffStatus, local: ItemState?, peer peerState: ItemState?) -> Row {
+    /// `status` 为 nil：对面还没按现在的清单扫过这一项
+    private func makeRow(id: String, status: DiffStatus?, local: ItemState?, peer peerState: ItemState?) -> Row {
         let rowStatus: RowStatus
         let suggested: String?
         switch status {
+        case nil: rowStatus = .peerOutdated; suggested = nil
         case .onlyLocal: rowStatus = .onlyChanged(me); suggested = me
         case .onlyPeer: rowStatus = .onlyChanged(peer); suggested = peer
         case .conflict: rowStatus = .conflict; suggested = nil

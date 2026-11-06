@@ -288,6 +288,24 @@ public struct SharedConfig: Codable, Sendable, Equatable {
         try JSON.encode(self, pretty: true).write(to: Paths.sharedFile, options: .atomic)
     }
 
+    /// 设置页保存：只把 `edited` 相对 `original` 改过的字段搬过来，其余字段保留自己的（可能是对面刚改的）
+    public mutating func apply(edits edited: SharedConfig, from original: SharedConfig) {
+        func take<T: Equatable>(_ path: WritableKeyPath<SharedConfig, T>) {
+            if edited[keyPath: path] != original[keyPath: path] { self[keyPath: path] = edited[keyPath: path] }
+        }
+        take(\.files)
+        take(\.dirs)
+        take(\.handlers)
+        take(\.equivalentApps)
+        take(\.prefs)
+        take(\.launchAgents)
+        take(\.templates)
+        take(\.secretFiles)
+        take(\.noiseKeys)
+        take(\.ignored)
+        take(\.acknowledged)
+    }
+
     public func isIgnored(_ id: String) -> Bool { Glob.matchAny(ignored, id) }
 
     public func isSecret(_ path: String) -> Bool { Glob.matchAny(secretFiles, path) }

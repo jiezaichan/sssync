@@ -44,6 +44,8 @@ struct StateDoc: Codable, Sendable {
     var report: MachineReport?
     /// 这台读不到的偏好域（沙盒被挡）：这些域的条目不知道值，不能当成「不存在」
     var unreadable: [String]?
+    /// 扫描时用的规则；旧版本发布的状态里没有
+    var scope: Scope?
 }
 
 /// 发给某台的待办：目标机器上当前值等于 expect 时，才把它写成 value。
@@ -96,6 +98,10 @@ public enum RowStatus: Sendable, Equatable {
     case conflict              // 两边都改了
     case firstTime             // 还没有基线
     case waiting               // 已拍板，等对面应用
+    case peerOutdated          // 清单改过，对面还没按新清单扫描，它的值不可信
+
+    /// 现在没什么可拍板的，等对面
+    public var isWaiting: Bool { self == .waiting || self == .peerOutdated }
 }
 
 public struct Row: Identifiable, Sendable {

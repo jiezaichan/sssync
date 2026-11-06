@@ -260,7 +260,8 @@ struct SyncListSettings: View {
                     .disabled(draft.wrappedValue == model.shared)
                 Button("保存") {
                     let new = draft.wrappedValue
-                    Task { await model.updateShared { $0 = new } }
+                    guard let original = model.shared else { return }
+                    Task { await model.updateShared { $0.apply(edits: new, from: original) } }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.wrappedValue == model.shared)

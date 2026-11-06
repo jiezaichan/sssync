@@ -130,12 +130,8 @@ final class AppModel {
     }
 
     /// 改两台共用的同步清单
-    func updateShared(_ change: (inout SharedConfig) -> Void) async {
-        guard let engine else { return }
-        var shared = await engine.shared
-        change(&shared)
-        let new = shared
-        await perform { try await $0.updateShared(new) }
+    func updateShared(_ change: @escaping @Sendable (inout SharedConfig) -> Void) async {
+        await perform { try await $0.updateShared(change) }
     }
 
     func ignore(_ row: Row) async {
@@ -357,11 +353,11 @@ final class AppModel {
 
     private func rows(for item: SidebarItem) -> [Row] {
         let everything = snapshot?.rows ?? []
-        if item == .acknowledged { return everything.filter { $0.status != .waiting && isAcked($0) } }
+        if item == .acknowledged { return everything.filter { !$0.status.isWaiting && isAcked($0) } }
         let all = everything.filter { !isAcked($0) }
         switch item {
-        case .pending: return all.filter { $0.status != .waiting }
-        case .waiting: return all.filter { $0.status == .waiting }
+        case .pending: return all.filter { !$0.status.isWaiting }
+        case .waiting: return all.filter { $0.status.isWaiting }
         case .acknowledged: return []
         case .files: return all.filter { $0.kind == .file || $0.kind == .dir }
         case .prefs: return all.filter { $0.kind == .pref }

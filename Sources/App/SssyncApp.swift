@@ -41,7 +41,7 @@ struct MenuBarContent: View {
         if let s = model.snapshot {
             Text("\(model.totalOpen) 项待处理")
             Text("待同步 \(model.count(.pending)) · 开发环境 \(model.count(.env)) · 应用 \(model.count(.apps))")
-            if model.count(.waiting) > 0 { Text("\(model.count(.waiting)) 项等\(s.label(s.peer))应用") }
+            if model.count(.waiting) > 0 { Text("\(model.count(.waiting)) 项在等\(s.label(s.peer))") }
         } else if let error = model.errorText {
             Text(error)
         } else {

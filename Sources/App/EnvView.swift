@@ -76,7 +76,7 @@ struct EnvList: View {
     private var filtered: [EnvSection] {
         sections.map { section in
             let rows = section.rows.filter { row in
-                (!onlyDiff || (!row.same && !model.isAcked(row)) || section.id == "errors")
+                (!onlyDiff || (!row.same && !row.localOnly && !model.isAcked(row)) || section.id == "errors")
                     && (search.isEmpty || row.name.localizedCaseInsensitiveContains(search)
                         || row.values.values.contains { $0.localizedCaseInsensitiveContains(search) })
             }
@@ -147,14 +147,20 @@ struct EnvRowView: View {
 
     var body: some View {
         let acked = !row.same && model.isAcked(row)
+        let icon = row.same ? "checkmark.circle.fill"
+            : row.localOnly ? "desktopcomputer"
+            : acked ? "checkmark.circle" : "exclamationmark.circle.fill"
+        let tint: Color = row.same ? .green : row.localOnly || acked ? .secondary : .orange
         HStack(spacing: 14) {
             HStack(spacing: 6) {
-                Image(systemName: row.same ? "checkmark.circle.fill" : acked ? "checkmark.circle" : "exclamationmark.circle.fill")
-                    .foregroundStyle(row.same ? Color.green : acked ? Color.secondary : Color.orange)
-                    .help(acked ? "已确认的差异" : "")
+                Image(systemName: icon)
+                    .foregroundStyle(tint)
+                    .help(row.localOnly ? "本机专属：在 local.zsh 里声明，故意不同" : acked ? "已确认的差异" : "")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).lineLimit(1).truncationMode(.middle).help(row.name)
-                    if let note = row.note {
+                    if row.localOnly {
+                        Text("本机专属").font(.caption).foregroundStyle(.secondary)
+                    } else if let note = row.note {
                         Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(note)
                     }
                 }
@@ -181,7 +187,7 @@ struct EnvRowView: View {
     @ViewBuilder
     private var actions: some View {
         HStack(spacing: 6) {
-            if !row.same && row.values.count > 0 {
+            if !row.same && !row.localOnly && row.values.count > 0 {
                 if model.isAcked(row) {
                     Button("取消确认") { Task { await model.unacknowledge([row.ackID]) } }
                 } else {

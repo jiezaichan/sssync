@@ -46,6 +46,8 @@ public struct MachineReport: Codable, Sendable {
     public var apps: [AppInfo]
     /// 采集时遇到的问题
     public var errors: [String]
+    /// 本机 `local.zsh` 里 export 的变量名：故意只属于这台，不参与差异
+    public var localEnv: [String]? = nil
 }
 
 /// 采集本机报告：一次 `zsh -lic` 拿到 shell 能看到的一切，其余直接读文件
@@ -117,8 +119,26 @@ enum ReportCollector {
             env: env,
             path: path,
             apps: apps(caskApps: caskApps((sections["CASKAPPS"] ?? []).joined(separator: "\n")), shared: shared),
-            errors: errors
+            errors: errors,
+            localEnv: localEnvNames()
         )
+    }
+
+    /// `local.zsh` 里 `export X=...` 的变量名。多行字符串里的内容不算，PATH 也不管
+    static func localEnvNames(at path: String = NSHomeDirectory() + "/.config/zsh/local.zsh") -> [String] {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        var names = Set<String>()
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("export ") else { continue }
+            let rest = line.dropFirst("export ".count)
+            guard let eq = rest.firstIndex(of: "=") else { continue }
+            let name = rest[..<eq].trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, name != "PATH",
+                  name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else { continue }
+            names.insert(name)
+        }
+        return names.sorted()
     }
 
     private static var script: String {

@@ -101,11 +101,12 @@ final class SupportTests: XCTestCase {
 }
 
 final class EnvCompareTests: XCTestCase {
-    func report(node: [String: [String: String]], formulae: [String: String], apps: [AppInfo] = []) -> MachineReport {
+    func report(node: [String: [String: String]], formulae: [String: String], apps: [AppInfo] = [],
+                env: [String: String] = ["A": "1"], localEnv: [String]? = nil) -> MachineReport {
         MachineReport(collectedAt: Date(), macOS: "27.2", tools: ["git": "2.54"],
                       node: NodeReport(nvm: "0.40", versions: ["22.23.3"], defaultVersion: "22.23.3", globals: node),
-                      pythons: [], uvTools: [:], formulae: formulae, casks: [:], env: ["A": "1"], path: ["/bin"],
-                      apps: apps, errors: [])
+                      pythons: [], uvTools: [:], formulae: formulae, casks: [:], env: env, path: ["/bin"],
+                      apps: apps, errors: [], localEnv: localEnv)
     }
 
     func testGlobalPackagesComparedByPackageNotNodeDir() {
@@ -145,5 +146,31 @@ final class EnvCompareTests: XCTestCase {
         let row = EnvCompare.apps(["home": home, "work": work], machines: ["home", "work"]).first!.rows.first!
         XCTAssertEqual(row.fixes["work"], .open("macappstore://apps.apple.com/app/id724472954"))
         XCTAssertEqual(row.removals["home"], .trash(path: "/Applications/Manico.app", bundleID: "im.manico.Manico"))
+    }
+
+    func testLocalEnvVarMarkedLocalOnly() {
+        let home = report(node: [:], formulae: [:])
+        let work = report(node: [:], formulae: [:], env: ["A": "1", "GITLAB_TOKEN": "x"], localEnv: ["GITLAB_TOKEN"])
+        let row = EnvCompare.environment(["home": home, "work": work], machines: ["home", "work"])
+            .first { $0.id == "env" }!.rows.first { $0.name == "GITLAB_TOKEN" }!
+        XCTAssertTrue(row.localOnly)
+        XCTAssertFalse(row.same)
+    }
+
+    func testLocalEnvNamesIgnoresMultilineAndPath() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("local-\(UUID().uuidString).zsh")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try """
+        # export COMMENTED=1
+        export ADB_MDNS=0
+        export JENKINS_JOBS="
+        node = cwork_release_xg-node
+        all = n k
+        "
+        . "$HOME/.local/bin/env"
+        export PATH="$HOME/bin:$PATH"
+        export GITLAB3_TOKEN=abc
+        """.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(ReportCollector.localEnvNames(at: url.path), ["ADB_MDNS", "GITLAB3_TOKEN", "JENKINS_JOBS"])
     }
 }

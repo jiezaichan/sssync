@@ -29,6 +29,8 @@ public struct EnvRow: Identifiable, Sendable {
     public let fixes: [String: Fix]
     /// 机器 → 在那台上卸载的办法；只给「这台有、另一台没有」的
     public var removals: [String: Fix] = [:]
+    /// 在某一台的 `local.zsh` 里声明过：故意不同，不算待处理
+    public var localOnly: Bool = false
 
     /// 确认差异用的 id 和签名；值里带版本号，升级后会重新出现
     public var ackID: String { "report:" + id }
@@ -50,7 +52,7 @@ public struct EnvSection: Identifiable, Sendable {
         self.footer = footer
     }
 
-    public var differing: Int { rows.filter { !$0.same }.count }
+    public var differing: Int { rows.filter { !$0.same && !$0.localOnly }.count }
 }
 
 /// 两台报告逐项对齐。补齐的命令只给缺的那台，卸载只给多出来的那台，都只在那台自己身上执行
@@ -140,11 +142,14 @@ public enum EnvCompare {
             row("tool-\(t)", t, machines) { reports[$0]?.tools[t] }
         } + [row("macos", "macOS", machines) { reports[$0]?.macOS }], footer: nil))
 
-        // 环境变量
+        // 环境变量；local.zsh 里声明过的自动标成本机专属
         let names = Set(machines.flatMap { reports[$0]?.env.keys.map { $0 } ?? [] }).sorted()
+        let localEnv = Set(machines.flatMap { reports[$0]?.localEnv ?? [] })
         sections.append(EnvSection(id: "env", title: "环境变量", systemImage: "dollarsign", rows: names.map { n in
-            row("env-\(n)", n, machines) { reports[$0]?.env[n] }
-        }, footer: "登录 shell（zsh -lic）生效后的值，密钥已打码。要改去改 ~/.config/zsh 里的文件；只属于一台的放 local.zsh"))
+            var row = row("env-\(n)", n, machines) { reports[$0]?.env[n] }
+            row.localOnly = localEnv.contains(n)
+            return row
+        }, footer: "登录 shell（zsh -lic）生效后的值，密钥已打码。要改去改 ~/.config/zsh 里的文件；只属于一台的放 local.zsh，会自动标成本机专属"))
 
         // PATH：按第一台的顺序，再补另一台独有的
         var pathOrder: [String] = []

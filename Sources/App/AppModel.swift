@@ -344,14 +344,14 @@ final class AppModel {
     /// 环境和应用里确认过的差异，按原分组
     var ackedReportSections: [EnvSection] {
         (envSections + appSections).compactMap { s in
-            let rows = s.rows.filter { !$0.same && isAcked($0) }
+            let rows = s.rows.filter { !$0.same && !$0.localOnly && isAcked($0) }
             return rows.isEmpty ? nil : EnvSection(id: s.id, title: s.title, systemImage: s.systemImage, rows: rows, footer: nil)
         }
     }
 
-    /// 不同、且还没确认的
+    /// 不同、且还没确认的；本机专属（local.zsh）不算
     func openRows(_ sections: [EnvSection]) -> [EnvRow] {
-        sections.flatMap(\.rows).filter { !$0.same && !isAcked($0) }
+        sections.flatMap(\.rows).filter { !$0.same && !$0.localOnly && !isAcked($0) }
     }
 
     var visibleGroups: [RowGroup] {

@@ -170,7 +170,8 @@ final class EnvCompareTests: XCTestCase {
         . "$HOME/.local/bin/env"
         export PATH="$HOME/bin:$PATH"
         export GITLAB3_TOKEN=abc
+        (( $#_om_cft )) && export OM_CHROME="$_om_cft[1]"
         """.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertEqual(ReportCollector.localEnvNames(at: url.path), ["ADB_MDNS", "GITLAB3_TOKEN", "JENKINS_JOBS"])
+        XCTAssertEqual(ReportCollector.localEnvNames(at: url.path), ["ADB_MDNS", "GITLAB3_TOKEN", "JENKINS_JOBS", "OM_CHROME"])
     }
 }

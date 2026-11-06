@@ -124,14 +124,17 @@ enum ReportCollector {
         )
     }
 
-    /// `local.zsh` 里 `export X=...` 的变量名。多行字符串里的内容不算，PATH 也不管
+    /// `local.zsh` 里 `export X=...` 的变量名。多行字符串里的内容不算，PATH 也不管；
+    /// 也认 `条件 && export X=...` 这种写法
     static func localEnvNames(at path: String = NSHomeDirectory() + "/.config/zsh/local.zsh") -> [String] {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
         var names = Set<String>()
         for raw in text.split(separator: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix("export ") else { continue }
-            let rest = line.dropFirst("export ".count)
+            guard !line.hasPrefix("#"), let export = line.range(of: "export ") else { continue }
+            let prefix = line[..<export.lowerBound].trimmingCharacters(in: .whitespaces)
+            guard prefix.isEmpty || prefix.hasSuffix("&&") || prefix.hasSuffix(";") || prefix.hasSuffix("|") else { continue }
+            let rest = line[export.upperBound...]
             guard let eq = rest.firstIndex(of: "=") else { continue }
             let name = rest[..<eq].trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, name != "PATH",

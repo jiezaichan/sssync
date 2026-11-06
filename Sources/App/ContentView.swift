@@ -326,7 +326,15 @@ struct RowView: View {
 
     @ViewBuilder
     private var actions: some View {
-        if row.status == .waiting {
+        if row.status == .same {
+            HStack(spacing: 6) {
+                Label("一致", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                if row.kind == .handler {
+                    handlerMenu
+                }
+            }
+        } else if row.status == .waiting {
             Label("已拍板，等\(snapshot.label(snapshot.peer))应用", systemImage: "clock")
                 .foregroundStyle(.secondary)
         } else if row.status == .peerOutdated {
@@ -337,6 +345,9 @@ struct RowView: View {
             HStack(spacing: 6) {
                 ForEach(snapshot.machineOrder, id: \.self) { machine in
                     choose(machine)
+                }
+                if row.kind == .handler {
+                    handlerMenu
                 }
                 if model.isAcked(row) {
                     Button {
@@ -399,6 +410,27 @@ struct RowView: View {
             Button(title, action: action).buttonStyle(.bordered).help(help)
         }
     }
+
+    /// 默认打开方式：直接把本机这个扩展名的关联设成选中的 App，不写待办
+    @ViewBuilder
+    private var handlerMenu: some View {
+        let apps = model.localApps
+        if !apps.isEmpty {
+            Menu {
+                ForEach(apps, id: \.bundleID) { app in
+                    Button(app.name) {
+                        Task { await model.setHandler(row, bundleID: app.bundleID) }
+                    }
+                }
+            } label: {
+                Label("设为", systemImage: "gearshape")
+            }
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(model.busy)
+            .help("在本机直接设置：把 \(row.name) 的默认打开方式设成选中的 App")
+        }
+    }
 }
 
 struct ValueCell: View {
@@ -448,6 +480,8 @@ struct StatusTag: View {
             return ("等\(snapshot.label(snapshot.peer))应用", .gray)
         case .peerOutdated:
             return ("等\(snapshot.label(snapshot.peer))刷新", .gray)
+        case .same:
+            return ("一致", .green)
         }
     }
 }

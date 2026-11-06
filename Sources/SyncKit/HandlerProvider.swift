@@ -29,9 +29,15 @@ struct HandlerProvider: Sendable {
     func apply(ext: String, value: String) async throws {
         guard value != absentFP else { throw SyncError("不能把 .\(ext) 设成「无默认 App」") }
         let bundleID = String(decoding: try blobs.get(value), as: UTF8.self)
+        try await apply(ext: ext, bundleID: bundleID)
+    }
+
+    /// 直接按 App 设置：界面上选一个 App 就改本机
+    @MainActor
+    func apply(ext: String, bundleID: String) async throws {
         let workspace = NSWorkspace.shared
         guard let app = config.equivalents(of: bundleID).lazy.compactMap({ workspace.urlForApplication(withBundleIdentifier: $0) }).first else {
-            throw SyncError("本机没装 \(bundleID)，先装上再同步 .\(ext)")
+            throw SyncError("本机没装 \(bundleID)，先装上再设置 .\(ext)")
         }
         guard let type = UTType(filenameExtension: ext) else { throw SyncError("系统不认识 .\(ext)") }
         try await workspace.setDefaultApplication(at: app, toOpen: type)

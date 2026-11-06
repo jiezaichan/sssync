@@ -104,6 +104,15 @@ public actor Engine {
             rows = result.diffs.map { id, status in
                 makeRow(id: id, status: status, local: local[id], peer: peerItems[id])
             }
+            // 默认打开方式要看全量：两台一致的也列出来，方便直接在本机改
+            rows += local.keys.filter { id in
+                ItemKind(id: id) == .handler
+                    && result.diffs[id] == nil
+                    && peerItems[id] != nil
+                    && local[id]?.fpOrAbsent == peerItems[id]?.fpOrAbsent
+            }.map { id in
+                makeRow(id: id, status: nil, local: local[id], peer: peerItems[id], same: true)
+            }
             rows += outdatedStates.compactMap { id, states in
                 states.0?.fpOrAbsent == states.1?.fpOrAbsent ? nil
                     : makeRow(id: id, status: nil, local: states.0, peer: states.1)
@@ -245,6 +254,12 @@ public actor Engine {
             try await applyChecked(id, value: target, mode: peerState?.mode, backup: Backup(session: Backup.newSession()))
             try writeBase([id: target])
         }
+    }
+
+    /// 只改本机：把某个扩展名的默认打开方式直接设成指定的 App，不写待办
+    @MainActor
+    public func setLocalHandler(ext: String, bundleID: String) async throws {
+        try await handlers.apply(ext: ext, bundleID: bundleID)
     }
 
     /// 合并结果：本机当场写入，同时作为待办发给对面；两边都应用后基线更新
@@ -412,17 +427,21 @@ public actor Engine {
         for (item, fp) in entries { lastBase[item] = fp }
     }
 
-    /// `status` 为 nil：对面还没按现在的清单扫过这一项
-    private func makeRow(id: String, status: DiffStatus?, local: ItemState?, peer peerState: ItemState?) -> Row {
+    /// `status` 为 nil：对面还没按现在的清单扫过这一项；`same` 为 true：两台一致，只用来展示
+    private func makeRow(id: String, status: DiffStatus?, local: ItemState?, peer peerState: ItemState?, same: Bool = false) -> Row {
         let rowStatus: RowStatus
         let suggested: String?
-        switch status {
-        case nil: rowStatus = .peerOutdated; suggested = nil
-        case .onlyLocal: rowStatus = .onlyChanged(me); suggested = me
-        case .onlyPeer: rowStatus = .onlyChanged(peer); suggested = peer
-        case .conflict: rowStatus = .conflict; suggested = nil
-        case .firstTime: rowStatus = .firstTime; suggested = nil
-        case .waitingPeer: rowStatus = .waiting; suggested = nil
+        if same {
+            rowStatus = .same; suggested = nil
+        } else {
+            switch status {
+            case nil: rowStatus = .peerOutdated; suggested = nil
+            case .onlyLocal: rowStatus = .onlyChanged(me); suggested = me
+            case .onlyPeer: rowStatus = .onlyChanged(peer); suggested = peer
+            case .conflict: rowStatus = .conflict; suggested = nil
+            case .firstTime: rowStatus = .firstTime; suggested = nil
+            case .waitingPeer: rowStatus = .waiting; suggested = nil
+            }
         }
         var states: [String: ItemState] = [:]
         states[me] = local ?? .absent

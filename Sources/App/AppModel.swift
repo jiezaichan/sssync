@@ -125,6 +125,18 @@ final class AppModel {
         await perform { try await $0.use(row.id, machine: machine) }
     }
 
+    /// 本机已装的 App，给「在本机设置」菜单用
+    var localApps: [AppInfo] {
+        guard let snapshot, let report = snapshot.reports[snapshot.me] else { return [] }
+        return report.apps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// 只改本机：把这一行的扩展名直接设成某个 App
+    func setHandler(_ row: Row, bundleID: String) async {
+        let ext = row.name.hasPrefix(".") ? String(row.name.dropFirst()) : row.name
+        await perform { try await $0.setLocalHandler(ext: ext, bundleID: bundleID) }
+    }
+
     func useMerged(_ row: Row, text: String) async {
         await perform { try await $0.useMerged(row.id, text: text) }
     }
@@ -320,6 +332,8 @@ final class AppModel {
         case .env: return openRows(envSections.filter { $0.id != "errors" }).count
         case .apps: return openRows(appSections).count
         case .acknowledged: return rows(for: .acknowledged).count + ackedReportSections.reduce(0) { $0 + $1.rows.count }
+        // 默认打开方式列表里有一致项，角标只数差异
+        case .handlers: return rows(for: .handlers).filter { $0.status != .same }.count
         default: return rows(for: item).count
         }
     }
@@ -353,15 +367,17 @@ final class AppModel {
 
     private func rows(for item: SidebarItem) -> [Row] {
         let everything = snapshot?.rows ?? []
-        if item == .acknowledged { return everything.filter { !$0.status.isWaiting && isAcked($0) } }
+        if item == .acknowledged {
+            return everything.filter { $0.status != .same && !$0.status.isWaiting && isAcked($0) }
+        }
         let all = everything.filter { !isAcked($0) }
         switch item {
-        case .pending: return all.filter { !$0.status.isWaiting }
-        case .waiting: return all.filter { $0.status.isWaiting }
+        case .pending: return all.filter { $0.status != .same && !$0.status.isWaiting }
+        case .waiting: return all.filter { $0.status != .same && $0.status.isWaiting }
         case .acknowledged: return []
-        case .files: return all.filter { $0.kind == .file || $0.kind == .dir }
-        case .prefs: return all.filter { $0.kind == .pref }
-        case .agents: return all.filter { $0.kind == .agent }
+        case .files: return all.filter { $0.status != .same && ($0.kind == .file || $0.kind == .dir) }
+        case .prefs: return all.filter { $0.status != .same && $0.kind == .pref }
+        case .agents: return all.filter { $0.status != .same && $0.kind == .agent }
         case .handlers: return all.filter { $0.kind == .handler }
         case .env, .apps: return []
         }

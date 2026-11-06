@@ -99,6 +99,7 @@ public enum RowStatus: Sendable, Equatable {
     case firstTime             // 还没有基线
     case waiting               // 已拍板，等对面应用
     case peerOutdated          // 清单改过，对面还没按新清单扫描，它的值不可信
+    case same                  // 两台一致；只用于要看全量的分类（默认打开方式）
 
     /// 现在没什么可拍板的，等对面
     public var isWaiting: Bool { self == .waiting || self == .peerOutdated }
